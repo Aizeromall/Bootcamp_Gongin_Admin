@@ -18,7 +18,7 @@ app.include_router(management_router) # 매니저 및 회원관리 백엔드
 app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"]) # 문의 백엔드
 from FastAPI.login.admin_login import router as admin_login_router # 관리자 로그인
 from FastAPI.login.manager_login import router as manager_login_router # 매니저 로그인
-
+from FastAPI.match.match_manage import router as match_manage_router # 경기 관리 조회
 
 app = FastAPI(title="공In중개사 관리자 API")
 
@@ -40,6 +40,7 @@ app.add_middleware(
 app.include_router(management_router)
 app.include_router(admin_login_router)
 app.include_router(manager_login_router)
+app.include_router(match_manage_router)
 
 
 @app.get("/health", tags=["Health"])
