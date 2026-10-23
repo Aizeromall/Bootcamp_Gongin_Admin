@@ -4,7 +4,6 @@ import pymysql
 
 load_dotenv()
 
-
 def connect(found_rows: bool = False):
     # found_rows=True: UPDATE 시 값이 그대로여도 매칭된 행 수를 rowcount로 반환
     return pymysql.connect(
