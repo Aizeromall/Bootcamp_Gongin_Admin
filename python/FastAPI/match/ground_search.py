@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 # DB에서 받은 구장 1줄(dict) → 앱으로 보낼 JSON(dict)으로 정리
-# database.py가 DictCursor를 쓰기 때문에 row["컬럼명"]으로 값을 꺼냄
+# 관리자 database.py의 connect()는 기본 커서(튜플)라서, 아래 조회에서 DictCursor를 지정해 row["컬럼명"]으로 값을 꺼냄
 # (Flutter의 Ground.fromJson 키 이름과 똑같이 맞춤)
 def ground_to_dict(row: dict) -> dict:
     return {
@@ -43,7 +43,7 @@ def select_grounds(keyword: Optional[str] = None):
     connection = None
     try:
         connection = connect()  # DB 연결
-        with connection.cursor() as cursor:  # SQL을 실행할 커서 (with가 끝나면 자동으로 닫힘)
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:  # SQL을 실행할 커서 (with가 끝나면 자동으로 닫힘)
             sql = """
                 SELECT g_code, g_name, g_address, g_num, g_price, g_information, g_time, g_lat, g_lng
                 FROM ground
@@ -77,9 +77,9 @@ def select_ground(g_code: str):
     connection = None
     try:
         connection = connect()
-        with connection.cursor() as cursor:
+        with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             sql = """
-                SELECT g_code, g_name, g_address, g_num, g_price, g_information, g_lat, g_lng
+                SELECT g_code, g_name, g_address, g_num, g_price, g_information, g_time, g_lat, g_lng
                 FROM ground
                 WHERE g_code = %s
             """
