@@ -72,6 +72,20 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # 앱 전체 글꼴 : IBM Plex Sans KR (agent.md 디자인 규칙)
+  # 굵기별 파일을 weight로 연결해 두면 FontWeight.w400~w700이 자동으로 맞는 파일을 사용
+  fonts:
+    - family: IBMPlexSansKR
+      fonts:
+        - asset: assets/fonts/IBMPlexSansKR-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/IBMPlexSansKR-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/IBMPlexSansKR-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/IBMPlexSansKR-Bold.ttf
+          weight: 700
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
