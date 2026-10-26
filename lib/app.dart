@@ -1,7 +1,7 @@
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 import 'package:flutter/material.dart';
 
-import 'view/login/role_selection_page.dart';
+import 'view/login/login_page.dart';
 
 class GonginApp extends StatelessWidget {
   const GonginApp({super.key});
@@ -24,7 +24,7 @@ class GonginApp extends StatelessWidget {
         contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 20),
       ),
     ),
-    home: const RoleSelectionPage(),
+    home: const LoginPage(),
   );
 }
 // 최종 수정일 : 2026-10-24

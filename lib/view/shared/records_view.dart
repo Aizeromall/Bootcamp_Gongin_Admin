@@ -70,6 +70,9 @@ class RecordDetails extends StatelessWidget {
     'received_reports': '받은 신고 이력',
     'g_name': '구장명',
     'g_code': '구장 코드',
+    // 2026-10-26: 실제 배정 데이터의 요일·시간 표시
+    'a_day': '배정 요일',
+    'a_time': '배정 시간',
     'a_start': '배정 시작',
     'a_end': '배정 종료',
     'e_date': '평가일',

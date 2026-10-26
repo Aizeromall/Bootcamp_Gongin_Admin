@@ -87,13 +87,18 @@ def login_manager(
     try:
         connection = connect()
         with connection.cursor() as cursor:
-            # 파라미터 바인딩으로 SQL 삽입 공격을 방지하고 로그인 성공 여부만 조회합니다.
+
+            # 작업자 : 양태건
+            # 수정일 : 2026-10-26
+            # [수정 1 시작] 인증된 담당 매니저의 이름(m_name)도 함께 조회합니다.
+            # 아이디·비밀번호 비교는 기존 파라미터 바인딩을 유지합니다.
             cursor.execute(
-                "SELECT m_id FROM `match_manager` "
+                "SELECT m_id, m_name FROM `match_manager` "
                 "WHERE m_id = %s AND m_pw = %s LIMIT 1",
                 (manager_id, password),
             )
             manager = cursor.fetchone()
+            # [수정 1 끝]
 
         # 계정 미존재와 비밀번호 불일치에는 같은 401을 반환해 계정 존재 여부를 숨깁니다.
         if manager is None:
@@ -105,8 +110,19 @@ def login_manager(
                 },
             )
 
+        # 작업자 : 양태건
+        # 수정일 : 2026-10-26
+        # [수정 2 시작] 기존 m_id에 담당자 이름과 인증된 역할을 추가합니다.
+        # 프론트는 m_name을 표시하고 role="manager"로 경기매니저 화면을 결정합니다.
         # 비밀번호는 응답에 포함하지 않습니다.
-        return {"result": "OK", "m_id": manager[0]}
+        return {
+            "result": "OK",
+            "m_id": manager[0],
+            "m_name": manager[1],
+            "role": "manager",
+        }
+        # [수정 2 끝]
+
     except HTTPException:
         # 의도적으로 만든 오류 코드는 상태를 변경하지 않고 그대로 전달합니다.
         raise
@@ -142,4 +158,4 @@ def login_manager(
         if connection is not None:
             connection.close()
 
-# 최종 수정 일 : 2026-10-22
+# 최종 수정 일 : 2026-10-26

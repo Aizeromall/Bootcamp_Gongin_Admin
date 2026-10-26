@@ -39,6 +39,8 @@ app.add_middleware(
 )
 
 # 기존 관리·관리자·매니저 기능 라우터를 그대로 등록합니다.
+app.include_router(management_router)
+app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"])
 app.include_router(management_router) # 매니저 및 회원관리 백엔드
 app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"]) # 문의 백엔드
 app.include_router(admin_login_router)

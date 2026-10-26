@@ -65,7 +65,7 @@ class RoleSelectionPage extends StatelessWidget {
                               child: InkWell(
                                 onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute<void>(
-                                    builder: (_) => LoginPage(role: role),
+                                    builder: (_) => const LoginPage(),
                                   ),
                                 ),
                                 child: Padding(
