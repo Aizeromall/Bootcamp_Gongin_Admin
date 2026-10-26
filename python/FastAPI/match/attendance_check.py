@@ -1,6 +1,6 @@
 # 작업자 : 양태건
 # 작업 일 : 2026-10-23
-# 담당 구장 예약 회원 출석 및 개인 결과기록 등록 API
+# 담당 구장 예약 회원 출석 등록 API
 
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import StrictBool
@@ -9,7 +9,7 @@ import pymysql
 import traceback
 
 
-router = APIRouter(prefix="/match", tags=["출석 체크"])
+router = APIRouter(prefix="/match", tags=["출석 체크 경기 입력"])
 
 
 # 출석 체크 완료 시 회원별로 호출 (true: 출석, false: 결석)

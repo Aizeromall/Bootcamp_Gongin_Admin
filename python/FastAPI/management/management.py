@@ -162,12 +162,13 @@ async def get_manager(m_id: str):
 
         curs.execute(
             """
-            SELECT a.assign_seq, a.g_code, g.g_name, a.a_start, a.a_end
+            SELECT a.assign_seq, a.g_code, g.g_name, a.a_day, a.a_time
             FROM assign a JOIN ground g ON g.g_code = a.g_code
-            WHERE a.m_id = %s ORDER BY a.a_start DESC
+            WHERE a.m_id = %s ORDER BY a.a_day, a.a_time
             """,
             (m_id,),
         )
+        # 2026-10-26 수정 / 작업자 : 양태건 / 실제 assign 테이블의 a_day(요일), a_time(시간)을 조회합니다.
         manager["assigns"] = curs.fetchall()
 
         curs.execute(

@@ -12,10 +12,12 @@ class DashboardPage extends StatefulWidget {
     super.key,
     required this.role,
     required this.userId,
+    this.userName,
     required this.onLogout,
   });
   final LoginRole role;
   final String userId;
+  final String? userName;
   final VoidCallback onLogout;
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -49,7 +51,11 @@ class _DashboardPageState extends State<DashboardPage> {
       appBar: AppBar(
         title: Text('공IN · ${labels[selected]}'),
         actions: [
-          Center(child: Text('${widget.role.label} · ${widget.userId}')),
+          Center(
+            child: Text(
+              '${widget.role.label} · ${widget.userName ?? widget.userId}',
+            ),
+          ),
           IconButton(
             tooltip: '로그아웃',
             onPressed: widget.onLogout,

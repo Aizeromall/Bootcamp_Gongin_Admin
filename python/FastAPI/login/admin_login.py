@@ -1,6 +1,7 @@
 # 작업자 : 최현준
 # 작업 일 : 2026-10-22
 # 관리자 Headquarter 계정 로그인 API
+# 2026-10-26: 담당자 정보와 본사 역할 응답을 원본에 통합
 
 
 # 처리 순서: JSON 요청 수신 → 공백 제거 → DB 설정 확인 → Headquarter 조회 → 결과/오류 응답
@@ -15,12 +16,17 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, Body, HTTPException, status
 
 
-# 현재 파일을 기준으로 두 단계 상위인 프로젝트 루트의 .env 파일을 Read
+# 작업자 : 양태건
+# 수정일 : 2026-10-26
+# 현재 파일을 기준으로 프로젝트 루트의 .env 파일을 읽습니다.
 # DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME을 사용
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+# [수정 1 시작] 프로젝트 루트의 .env 경로로 수정 (parents[2] → parents[3])
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
+# [수정 1 끝]
 
 # main.py에서 include_router()로 연결할 관리자 API 라우터
 # prefix와 아래의 "/login" 경로가 합쳐져 최종 주소는 POST /admin/login이 진행
+# 관리자 로그인 라우터는 한 번만 정의합니다.
 router = APIRouter(prefix="/admin", tags=["Admin Login"])
 # DB 오류의 상세 원인은 서버 로그에만 남기고 클라이언트에는 오류 코드만 전달
 logger = logging.getLogger(__name__)
@@ -78,7 +84,7 @@ def login_admin(
     # Body(...)는 필수 JSON 필드라는 뜻이며, max_length는 과도하게 긴 입력을 제한
     h_id: str = Body(..., max_length=45),
     h_pw: str = Body(..., max_length=128),
-) -> dict[str, str]:
+) -> dict[str, str | None]:
     """Headquarter 테이블의 h_id와 h_pw가 일치하는 관리자를 로그인합니다."""
 
     # 아이디·비밀번호의 모든 공백을 제거하여 입력 형식을 통일
@@ -103,11 +109,17 @@ def login_admin(
             # 2) 파라미터 바인딩으로 SQL 삽입 공격을 방지하며 계정 존재 여부만 조회
             #    로그인 성공 여부만 필요하므로 비밀번호는 응답·로그에 포함하지 않음
             cursor.execute(
-                "SELECT h_id FROM `Headquarter` "
+
+# 작업자 : 양태건
+# # 수정일 : 2026-10-26
+                # [수정 2 시작] 본사 테이블에서 인증된 담당자의 표시 정보를 함께 조회
+                # 매니저 테이블을 대신 조회하거나 본사 권한으로 승격하지 않습니다.
+                "SELECT h_id, h_name, h_position, h_department FROM `Headquarter` "
                 "WHERE h_id = %s AND h_pw = %s LIMIT 1",
                 (admin_id, password),
             )
             headquarter = cursor.fetchone()
+            # [수정 2 끝]
 
         # 3) 없는 아이디와 비밀번호 불일치에는 같은 401 응답을 반환해 계정 존재 여부를 숨김
         if headquarter is None:
@@ -119,8 +131,22 @@ def login_admin(
                 },
             )
 
-        # 4) 인증 성공 시 아이디와 성공 결과만 반환
-        return {"result": "OK", "h_id": headquarter[0]}
+# 작업자 : 양태건
+# 수정일 : 2026-10-26
+        # [수정 3 시작] 기존 h_id 응답을 유지하고 담당자 정보와 서버에서 정한 역할 반환
+        # role은 프론트의 화면 선택값이 아닌 인증에 사용한 본사 테이블 기준입니다.
+        # 비밀번호는 반환하지 않습니다.
+        # 주의: 이 응답은 인증 토큰이 아닙니다. 본사 전용 API는 별도 인증·권한 검사가 필요합니다.
+        return {
+            "result": "OK",
+            "h_id": headquarter[0],
+            "h_name": headquarter[1],
+            "h_position": headquarter[2],
+            "h_department": headquarter[3],
+            "role": "headquarters",
+        }
+        # [수정 3 끝]
+
     except HTTPException:
         # 위에서 의도적으로 만든 400·401·500 오류 코드는 그대로 클라이언트에 전달
         raise
@@ -160,4 +186,5 @@ def login_admin(
             connection.close()
 
 
-# 최종 수정일 : 2026-10-22
+# 최종 수정일 : 2026-10-26
+# 작업자 : 양태건

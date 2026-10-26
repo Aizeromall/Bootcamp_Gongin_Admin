@@ -2,13 +2,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../model/login_role.dart';
 import '../../vm/login_notifier.dart';
 import '../dashboard/dashboard_page.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
-  const LoginPage({super.key, required this.role});
-  final LoginRole role;
+  const LoginPage({super.key});
   @override
   ConsumerState<LoginPage> createState() => _LoginPageState();
 }
@@ -28,9 +26,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
   Future<void> _submit() async {
     if (!_form.currentState!.validate()) return;
-    await ref
-        .read(loginProvider.notifier)
-        .login(widget.role, _id.text, _password.text);
+    await ref.read(loginProvider.notifier).login(_id.text, _password.text);
     if (!mounted) return;
     if (ref.read(loginProvider).value != null) {
       _password.clear();
@@ -44,8 +40,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final loggedIn = state.asData?.value;
     if (loggedIn != null) {
       return DashboardPage(
-        role: widget.role,
-        userId: loggedIn,
+        key: ValueKey('${loggedIn.role.name}:${loggedIn.userId}'),
+        role: loggedIn.role,
+        userId: loggedIn.userId,
+        userName: loggedIn.name,
         onLogout: () => ref.read(loginProvider.notifier).reset(),
       );
     }
@@ -70,135 +68,102 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   color: Colors.white,
                   child: Padding(
                     padding: const EdgeInsets.all(32),
-                    child: loggedIn != null
-                        ? Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.check_circle_outline,
-                                size: 64,
-                                color: Color(0xFF34734F),
-                              ),
-                              const SizedBox(height: 24),
-                              Text(
-                                '${widget.role.label} 로그인 완료',
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Text('$loggedIn 님, 환영합니다.'),
-                              const SizedBox(height: 24),
-                              OutlinedButton(
-                                onPressed: () =>
-                                    ref.read(loginProvider.notifier).reset(),
-                                child: const Text('로그아웃'),
-                              ),
-                            ],
-                          )
-                        : Form(
-                            key: _form,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                const Icon(
-                                  Icons.sports_soccer,
-                                  size: 40,
-                                  color: Color(0xFF34734F),
-                                ),
-                                const SizedBox(height: 24),
-                                Text(
-                                  '${widget.role.label} 로그인',
-                                  style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                const Text(
-                                  '발급받은 아이디와 비밀번호를 입력해 주세요.',
-                                  style: TextStyle(color: Color(0xFF68756C)),
-                                ),
-                                const SizedBox(height: 32),
-                                TextFormField(
-                                  controller: _id,
-                                  enabled: !state.isLoading,
-                                  decoration: const InputDecoration(
-                                    labelText: '아이디',
-                                  ),
-                                  textInputAction: TextInputAction.next,
-                                  validator: (value) =>
-                                      (value ?? '')
-                                          .replaceAll(RegExp(r'\s'), '')
-                                          .isEmpty
-                                      ? '아이디를 입력해 주세요.'
-                                      : null,
-                                ),
-                                const SizedBox(height: 20),
-                                TextFormField(
-                                  controller: _password,
-                                  enabled: !state.isLoading,
-                                  obscureText: _obscure,
-                                  autocorrect: false,
-                                  enableSuggestions: false,
-                                  decoration: InputDecoration(
-                                    labelText: '비밀번호',
-                                    suffixIcon: IconButton(
-                                      tooltip: _obscure
-                                          ? '비밀번호 표시'
-                                          : '비밀번호 숨기기',
-                                      onPressed: () =>
-                                          setState(() => _obscure = !_obscure),
-                                      icon: Icon(
-                                        _obscure
-                                            ? Icons.visibility_outlined
-                                            : Icons.visibility_off_outlined,
-                                      ),
-                                    ),
-                                  ),
-                                  onFieldSubmitted: (_) => _submit(),
-                                  validator: (value) =>
-                                      (value ?? '')
-                                          .replaceAll(RegExp(r'\s'), '')
-                                          .isEmpty
-                                      ? '비밀번호를 입력해 주세요.'
-                                      : null,
-                                ),
-                                if (state.hasError)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 16),
-                                    child: Text(
-                                      state.error.toString().replaceFirst(
-                                        'Exception: ',
-                                        '',
-                                      ),
-                                      style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .error,
-                                      ),
-                                    ),
-                                  ),
-                                const SizedBox(height: 28),
-                                FilledButton(
-                                  onPressed: state.isLoading ? null : _submit,
-                                  style: FilledButton.styleFrom(
-                                    padding: const EdgeInsets.all(20),
-                                  ),
-                                  child: state.isLoading
-                                      ? const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('로그인'),
-                                ),
-                              ],
+                    child: Form(
+                      key: _form,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Icon(
+                            Icons.sports_soccer,
+                            size: 40,
+                            color: Color(0xFF34734F),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            '담당자 로그인',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            '발급받은 아이디와 비밀번호를 입력해 주세요.',
+                            style: TextStyle(color: Color(0xFF68756C)),
+                          ),
+                          const SizedBox(height: 32),
+                          TextFormField(
+                            controller: _id,
+                            enabled: !state.isLoading,
+                            decoration: const InputDecoration(labelText: '아이디'),
+                            textInputAction: TextInputAction.next,
+                            validator: (value) =>
+                                (value ?? '')
+                                    .replaceAll(RegExp(r'\s'), '')
+                                    .isEmpty
+                                ? '아이디를 입력해 주세요.'
+                                : null,
+                          ),
+                          const SizedBox(height: 20),
+                          TextFormField(
+                            controller: _password,
+                            enabled: !state.isLoading,
+                            obscureText: _obscure,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            decoration: InputDecoration(
+                              labelText: '비밀번호',
+                              suffixIcon: IconButton(
+                                tooltip: _obscure ? '비밀번호 표시' : '비밀번호 숨기기',
+                                onPressed: () =>
+                                    setState(() => _obscure = !_obscure),
+                                icon: Icon(
+                                  _obscure
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                            onFieldSubmitted: (_) => _submit(),
+                            validator: (value) =>
+                                (value ?? '')
+                                    .replaceAll(RegExp(r'\s'), '')
+                                    .isEmpty
+                                ? '비밀번호를 입력해 주세요.'
+                                : null,
+                          ),
+                          if (state.hasError)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 16),
+                              child: Text(
+                                state.error.toString().replaceFirst(
+                                  'Exception: ',
+                                  '',
+                                ),
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 28),
+                          FilledButton(
+                            onPressed: state.isLoading ? null : _submit,
+                            style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.all(20),
+                            ),
+                            child: state.isLoading
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('로그인'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
