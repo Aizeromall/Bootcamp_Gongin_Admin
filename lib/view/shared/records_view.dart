@@ -42,6 +42,16 @@ class RecordDetails extends StatelessWidget {
   const RecordDetails({super.key, required this.record});
   final Map<String, dynamic> record;
   static const labels = {
+    // 작업자 : 양태건
+    // 수정일 : 2026-10-26
+    // [추가 시작] 이전 경기 결과의 원본 필드 표시명
+    'c_r_r_team': '팀명',
+    'c_r_r_score': '최종 스코어',
+    'e_code': '종목 코드',
+    'c_r_r_statcode': '기존 스탯 코드',
+    'c_r_r_attendance': '출석 여부',
+    'c_r_r_date': '결과 등록일',
+    // [추가 끝]
     'c_id_seq': '회원 ID',
     'c_name': '회원 이름',
     'c_phone': '연락처',

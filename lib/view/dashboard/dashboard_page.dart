@@ -13,11 +13,13 @@ class DashboardPage extends StatefulWidget {
     required this.role,
     required this.userId,
     this.userName,
+    this.department,
     required this.onLogout,
   });
   final LoginRole role;
   final String userId;
   final String? userName;
+  final String? department;
   final VoidCallback onLogout;
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -30,7 +32,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final headquarters = widget.role == LoginRole.headquarters;
     final labels = headquarters
         ? ['회원 관리', '매니저 관리', '문의 관리', '구장 조회']
-        : ['담당 경기'];
+        : ['내 매치', '지난 매치'];
     final icons = headquarters
         ? [
             Icons.people_outline,
@@ -38,7 +40,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Icons.question_answer_outlined,
             Icons.stadium_outlined,
           ]
-        : [Icons.sports_soccer];
+        : [Icons.sports_soccer, Icons.history];
     final pages = headquarters
         ? <Widget>[
             const ManagementPage(key: ValueKey('members'), managers: false),
@@ -46,14 +48,28 @@ class _DashboardPageState extends State<DashboardPage> {
             InquiryPage(staffId: widget.userId),
             const GroundPage(),
           ]
-        : <Widget>[MatchPage(managerId: widget.userId)];
+        // 작업자 : 양태건
+        // 수정일 : 2026-10-26
+        // [수정 시작] 완료된 경기만 지난 매치로 분리합니다.
+        : <Widget>[
+            MatchPage(
+              key: const ValueKey('current'),
+              managerId: widget.userId,
+              onCompleted: () => setState(() => selected = 1),
+            ),
+            MatchPage(
+              key: const ValueKey('history'),
+              managerId: widget.userId,
+              history: true,
+            ),
+          ];
     return Scaffold(
       appBar: AppBar(
         title: Text('공IN · ${labels[selected]}'),
         actions: [
           Center(
             child: Text(
-              '${widget.role.label} · ${widget.userName ?? widget.userId}',
+              '${widget.role.label}${widget.department == null ? '' : ' (${widget.department})'} · ${widget.userName ?? widget.userId}',
             ),
           ),
           IconButton(
@@ -66,7 +82,7 @@ class _DashboardPageState extends State<DashboardPage> {
       body: LayoutBuilder(
         builder: (context, constraints) => Row(
           children: [
-            if (constraints.maxWidth >= 760 && headquarters)
+            if (constraints.maxWidth >= 760)
               NavigationRail(
                 extended: constraints.maxWidth >= 1100,
                 selectedIndex: selected,
@@ -84,8 +100,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ],
         ),
       ),
-      bottomNavigationBar:
-          MediaQuery.sizeOf(context).width < 760 && headquarters
+      bottomNavigationBar: MediaQuery.sizeOf(context).width < 760
           ? NavigationBar(
               selectedIndex: selected,
               onDestinationSelected: (index) =>
@@ -100,3 +115,5 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 // 최종 수정일 : 2026-10-24
+
+// [수정 끝]

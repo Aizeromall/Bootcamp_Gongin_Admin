@@ -44,6 +44,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         role: loggedIn.role,
         userId: loggedIn.userId,
         userName: loggedIn.name,
+        // 작업자 : 양태건
+        // 수정일 : 2026-10-26
+        // 인증된 부서를 담당자 표시 영역에 전달합니다.
+        department: loggedIn.department,
         onLogout: () => ref.read(loginProvider.notifier).reset(),
       );
     }

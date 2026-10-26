@@ -11,6 +11,8 @@ void main() {
   ProviderContainer containerFor(
     Set<LoginRole> accepted, {
     bool serverError = false,
+    String managerDepartment = '매니저',
+    String? returnedRole,
   }) {
     final client = MockClient((request) async {
       final role = request.url.path == '/admin/login'
@@ -22,12 +24,15 @@ void main() {
         jsonEncode({
           'result': 'OK',
           '${role.fieldPrefix}_id': 'staff01',
-          if (role == LoginRole.headquarters) ...{
-            'role': 'headquarters',
-            'h_name': 'HQ Staff',
+          'role': returnedRole ?? role.name,
+          if (role == LoginRole.manager) ...{
+            'm_department': managerDepartment,
+            'access_token': 'signed-test-token',
           },
+          if (role == LoginRole.headquarters) ...{'h_name': 'HQ Staff'},
         }),
         200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
       );
     });
     final container = ProviderContainer(
@@ -49,12 +54,33 @@ void main() {
         final session = container.read(loginProvider).requireValue!;
         expect(session.role, role);
         expect(session.userId, 'staff01');
+        if (role == LoginRole.manager) {
+          expect(session.department, '매니저');
+          expect(session.accessToken, 'signed-test-token');
+        }
         if (role == LoginRole.headquarters) expect(session.name, 'HQ Staff');
         container.read(loginProvider.notifier).reset();
         expect(container.read(loginProvider).requireValue, isNull);
       },
     );
   }
+  // 작업자 : 양태건
+  // 수정일 : 2026-10-26
+  // 부서 또는 역할이 일치하지 않는 응답은 화면 진입을 차단합니다.
+  test('manager endpoint cannot grant another department access', () async {
+    final container = containerFor({
+      LoginRole.manager,
+    }, managerDepartment: '본사');
+    await container.read(loginProvider.notifier).login('staff01', 'password');
+    expect(container.read(loginProvider).hasError, isTrue);
+  });
+  test('mismatched role response is rejected', () async {
+    final container = containerFor({
+      LoginRole.manager,
+    }, returnedRole: 'headquarters');
+    await container.read(loginProvider.notifier).login('staff01', 'password');
+    expect(container.read(loginProvider).hasError, isTrue);
+  });
   test('invalid credentials do not create a session', () async {
     final container = containerFor({});
     await container.read(loginProvider.notifier).login('unknown', 'password');

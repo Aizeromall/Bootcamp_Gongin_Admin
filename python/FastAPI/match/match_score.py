@@ -60,7 +60,7 @@ def match_score(
             # 기존 출석 기록과 경기 결과기록을 확인
             cursor.execute(
                 """
-                SELECT c_r_r_attendance, c_r_r_score
+                SELECT c_r_r_attendance, c_r_r_score, c_r_r_injury
                 FROM c_result_record
                 WHERE c_id_seq = %s AND g_code = %s AND c_r_r_code = %s
                 FOR UPDATE
@@ -73,17 +73,20 @@ def match_score(
             if not any(record["c_r_r_attendance"] == 1 for record in records):
                 raise HTTPException(status_code=409, detail="회원의 출석 처리를 먼저 완료해 주세요.")
 
+            # 작업자 : 양태건
+            # 수정일 : 2026-10-26
+            # 기존 등록 경로에서도 출석 행의 부상 내용을 유지합니다.
             # 기존 출석 행은 유지하고 경기 결과를 별도 행으로 등록
             cursor.execute(
                 """
                 INSERT INTO c_result_record
                     (m_id, g_code, c_id_seq, c_r_r_team, c_r_r_code,
-                     e_code, c_r_r_statcode, c_r_r_attendance, c_r_r_score)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     e_code, c_r_r_statcode, c_r_r_attendance, c_r_r_score, c_r_r_injury)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (m_id, reservation["g_code"], reservation["c_id_seq"],
                  c_r_r_team, reservation["c_r_r_code"], e_code,
-                 c_r_r_statcode, True, c_r_r_score)
+                 c_r_r_statcode, True, c_r_r_score, next((r["c_r_r_injury"] for r in records if r.get("c_r_r_injury")), ""))
             )
             c_r_r_seq = cursor.lastrowid
 

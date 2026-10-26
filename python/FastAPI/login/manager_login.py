@@ -10,6 +10,12 @@ import pymysql
 from dotenv import load_dotenv
 from fastapi import APIRouter, Body, HTTPException, status
 
+# 작업자 : 양태건
+# 수정일 : 2026-10-26
+# [추가 시작] 경기 진행 API에서 담당 매니저를 검증할 로그인 토큰 발급
+from ..match.manager_session import issue_manager_session
+# [추가 끝]
+
 
 # 현재 파일(login/manager_login.py)을 기준으로 세 단계 상위인 프로젝트 루트의
 # .env 파일을 읽습니다. DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME을 사용합니다.
@@ -90,12 +96,13 @@ def login_manager(
 
             # 작업자 : 양태건
             # 수정일 : 2026-10-26
-            # [수정 1 시작] 인증된 담당 매니저의 이름(m_name)도 함께 조회합니다.
+            # [수정 1 시작] 아이디·비밀번호와 새 부서명(m_department)을 함께 확인합니다.
+            # 매니저 부서가 아닌 계정은 매니저 로그인에 사용할 수 없습니다.
             # 아이디·비밀번호 비교는 기존 파라미터 바인딩을 유지합니다.
             cursor.execute(
-                "SELECT m_id, m_name FROM `match_manager` "
-                "WHERE m_id = %s AND m_pw = %s LIMIT 1",
-                (manager_id, password),
+                "SELECT m_id, m_name, m_department FROM `match_manager` "
+                "WHERE m_id = %s AND m_pw = %s AND TRIM(m_department) = %s LIMIT 1",
+                (manager_id, password, "매니저"),
             )
             manager = cursor.fetchone()
             # [수정 1 끝]
@@ -119,7 +126,17 @@ def login_manager(
             "result": "OK",
             "m_id": manager[0],
             "m_name": manager[1],
+            # 작업자 : 양태건
+            # 수정일 : 2026-10-26
+            # [추가 시작] 프론트에서도 인증된 부서 정보를 확인합니다.
+            "m_department": manager[2].strip(),
+            # [추가 끝]
             "role": "manager",
+            # 작업자 : 양태건
+            # 수정일 : 2026-10-26
+            # [추가 시작] DB 세션 테이블 없이 12시간 유효한 서명 토큰 전달
+            "access_token": issue_manager_session(manager[0]),
+            # [추가 끝]
         }
         # [수정 2 끝]
 

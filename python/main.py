@@ -22,6 +22,12 @@ from FastAPI.match.attendance_check import router as attendance_check_router # �
 from FastAPI.match.match_score import router as match_score_router # 경기 결과기록 등록
 from FastAPI.match.ground_search import router as ground_search_router # 구장 조회
 
+# 작업자 : 양태건
+# 수정일 : 2026-10-26
+# [추가 시작] 인증된 매니저의 경기 진행 라우터
+from FastAPI.match.match_operations import router as match_operations_router
+# [추가 끝]
+
 app = FastAPI(title="공In중개사 관리자 API")
 
 # Flutter 웹 클라이언트의 API 요청을 허용합니다.
@@ -41,8 +47,11 @@ app.add_middleware(
 # 기존 관리·관리자·매니저 기능 라우터를 그대로 등록합니다.
 app.include_router(management_router)
 app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"])
-app.include_router(management_router) # 매니저 및 회원관리 백엔드
-app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"]) # 문의 백엔드
+# 작업자 : 양태건
+# 수정일 : 2026-10-26
+# [추가 시작]
+app.include_router(match_operations_router)
+# [추가 끝]
 app.include_router(admin_login_router)
 app.include_router(manager_login_router)
 app.include_router(match_manage_router)

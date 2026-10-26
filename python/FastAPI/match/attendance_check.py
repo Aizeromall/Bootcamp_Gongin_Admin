@@ -61,12 +61,15 @@ def attendance_check(
             if cursor.fetchone() is not None:
                 raise HTTPException(status_code=409, detail="이미 출석 체크가 등록된 예약입니다.")
 
+            # 작업자 : 양태건
+            # 수정일 : 2026-10-26
+            # 부상 없는 출석 기록도 NOT NULL 컬럼에 빈 문자열을 저장합니다.
             # 경기 전이므로 팀·스탯은 입력하지 않고 출석 여부만 결과기록에 등록
             cursor.execute(
                 """
                 INSERT INTO c_result_record
-                    (m_id, g_code, c_id_seq, c_r_r_code, c_r_r_attendance)
-                VALUES (%s, %s, %s, %s, %s)
+                    (m_id, g_code, c_id_seq, c_r_r_code, c_r_r_attendance, c_r_r_injury)
+                VALUES (%s, %s, %s, %s, %s, '')
                 """,
                 (m_id, reservation["g_code"], reservation["c_id_seq"],
                  reservation["c_r_r_code"], c_r_r_attendance)

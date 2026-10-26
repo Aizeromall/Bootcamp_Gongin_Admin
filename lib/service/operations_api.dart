@@ -6,13 +6,22 @@ import 'package:http/http.dart' as http;
 
 import '../vm/login_notifier.dart';
 
-final operationsApiProvider = Provider((ref) => OperationsApi());
+// 작업자 : 양태건
+// 수정일 : 2026-10-26
+// [수정 시작] 새 경기 API에 로그인 토큰을 전달합니다.
+final operationsApiProvider = Provider(
+  (ref) => OperationsApi(
+    accessToken: ref.watch(loginProvider).asData?.value?.accessToken,
+  ),
+);
 final operationsDataProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, String>(
       (ref, path) => ref.read(operationsApiProvider).request(path),
     );
 
 class OperationsApi {
+  OperationsApi({this.accessToken});
+  final String? accessToken;
   Future<Map<String, dynamic>> request(
     String path, {
     Map<String, dynamic>? json,
@@ -25,12 +34,29 @@ class OperationsApi {
         await (json != null
                 ? http.post(
                     uri,
-                    headers: {'Content-Type': 'application/json'},
+                    headers: {
+                      'Content-Type': 'application/json',
+                      if (accessToken != null)
+                        'Authorization': 'Bearer $accessToken',
+                    },
                     body: jsonEncode(json),
                   )
                 : form != null
-                ? http.post(uri, body: form)
-                : http.get(uri))
+                ? http.post(
+                    uri,
+                    body: form,
+                    headers: {
+                      if (accessToken != null)
+                        'Authorization': 'Bearer $accessToken',
+                    },
+                  )
+                : http.get(
+                    uri,
+                    headers: {
+                      if (accessToken != null)
+                        'Authorization': 'Bearer $accessToken',
+                    },
+                  ))
             .timeout(const Duration(seconds: 10));
     if (response.statusCode == 404) {
       throw Exception('요청한 데이터 또는 API를 찾을 수 없습니다. 서버 연결을 확인해 주세요.');
@@ -50,3 +76,5 @@ class OperationsApi {
   }
 }
 // 최종 수정일 : 2026-10-24
+
+// [수정 끝]
