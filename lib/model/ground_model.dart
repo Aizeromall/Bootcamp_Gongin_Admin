@@ -26,7 +26,8 @@ class Ground {
   // 서버에서 받은 JSON -> Ground객체 
   factory Ground.fromJson(Map<String, dynamic> json) {
     return Ground(
-      g_code: json['g_code'] ?? "__",
+      // 2026-10-26 수정: DB의 숫자 구장 코드를 앱에서 사용하는 문자열로 변환합니다.
+      g_code: json['g_code']?.toString() ?? "__",
       g_name: json['g_name'] ?? "__",
       g_address: json['g_address'] ?? "__",
       g_num: json['g_num'] ?? 0,
