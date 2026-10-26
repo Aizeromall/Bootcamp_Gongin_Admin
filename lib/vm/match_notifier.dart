@@ -35,7 +35,10 @@ import '../model/ground_model.dart';
 // FastAPI 서버 주소
 // - Android 에뮬레이터에서 내 PC 서버에 접속할 때는 127.0.0.1 대신 10.0.2.2 사용
 // - 실제 휴대폰으로 테스트할 때는 서버 PC의 IP(예: http://192.168.x.x:8000)로 변경
-const String baseUrl = 'http://127.0.0.1:8000';
+const String baseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://localhost:8000',
+);
 
 // ------------------------------------------------------------
 // 본사 구장 관리 목록 상태관리 (전체 구장 조회 + 검색)
@@ -58,9 +61,9 @@ class GroundListNotifier extends AsyncNotifier<List<Ground>> {
   // keyword가 비어 있으면 전체 목록, 있으면 구장명/주소 검색 결과
   Future<List<Ground>> _fetchGrounds(String keyword) async {
     // Uri.parse(...).replace(queryParameters:) : 한글 검색어도 주소에 맞게 자동 인코딩
-    final uri = Uri.parse('$baseUrl/match/ground').replace(
-      queryParameters: keyword.isEmpty ? null : {'keyword': keyword},
-    );
+    final uri = Uri.parse(
+      '$baseUrl/match/ground',
+    ).replace(queryParameters: keyword.isEmpty ? null : {'keyword': keyword});
     final response = await http.get(uri);
 
     // 200이 아니면 서버 오류 → 예외를 던지면 state가 AsyncError가 되어 화면의 error: 부분이 표시됨
@@ -79,7 +82,7 @@ class GroundListNotifier extends AsyncNotifier<List<Ground>> {
   // 구장 검색 (본사 구장 관리 화면의 검색 버튼 / 검색창 입력 완료 시 호출)
   // 빈 문자열을 넣으면 전체 목록으로 돌아감
   Future<void> searchGrounds(String keyword) async {
-    _keyword = keyword.trim();  // 앞뒤 공백 제거
+    _keyword = keyword.trim(); // 앞뒤 공백 제거
     // 1) 먼저 로딩 상태로 바꿔서 화면에 로딩 표시
     state = const AsyncLoading();
     // 2) AsyncValue.guard : 안의 함수가 성공하면 AsyncData, 예외가 나면 AsyncError로 자동 변환
@@ -100,7 +103,9 @@ class GroundListNotifier extends AsyncNotifier<List<Ground>> {
 //   ref.read(groundListProvider.notifier)   → GroundListNotifier의 함수(search/refresh) 호출
 // GroundListNotifier.new : Provider가 처음 쓰일 때 Notifier 객체를 만드는 생성자
 final groundListProvider =
-    AsyncNotifierProvider<GroundListNotifier, List<Ground>>(GroundListNotifier.new);
+    AsyncNotifierProvider<GroundListNotifier, List<Ground>>(
+      GroundListNotifier.new,
+    );
 
 // ------------------------------------------------------------
 // 구장 1건 상세 조회 (본사 구장 상세 화면)
@@ -110,7 +115,10 @@ final groundListProvider =
 // 본사 구장 상세 화면은 조회만 하고 바꿀 상태가 없어서 Notifier 대신 FutureProvider 사용
 // g_code가 같으면 결과를 재사용하고, 다르면 구장별로 따로 조회
 // 사용 예: ref.watch(groundDetailProvider(ground.g_code))
-final groundDetailProvider = FutureProvider.family<Ground, String>((ref, gCode) async {
+final groundDetailProvider = FutureProvider.family<Ground, String>((
+  ref,
+  gCode,
+) async {
   final response = await http.get(Uri.parse('$baseUrl/match/ground/$gCode'));
 
   // 404 : 존재하지 않는 구장 코드 (서버에서 detail 메시지를 보내줌)
