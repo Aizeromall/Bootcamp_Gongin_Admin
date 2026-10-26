@@ -21,6 +21,8 @@ from FastAPI.match.match_manage import router as match_manage_router # 경기 �
 from FastAPI.match.attendance_check import router as attendance_check_router # 출석 체크 등록
 from FastAPI.match.match_score import router as match_score_router # 경기 결과기록 등록
 from FastAPI.match.ground_search import router as ground_search_router # 구장 조회
+from FastAPI.match.match_cancel import router as match_cancel_router # 구장 취소 내역 조회
+from FastAPI.match.match_manage_cancel import router as match_manage_cancel_router # 매니저 매칭 취소
 
 app = FastAPI(title="공In중개사 관리자 API")
 
@@ -49,6 +51,8 @@ app.include_router(match_manage_router)
 app.include_router(attendance_check_router)
 app.include_router(match_score_router)
 app.include_router(ground_search_router, prefix="/match", tags=["Ground Search"]) # 구장 조회
+app.include_router(match_cancel_router) # 구장 취소 내역 조회
+app.include_router(match_manage_cancel_router) # 매니저 매칭 취소
 
 
 @app.get("/health", tags=["Health"])
