@@ -1,3 +1,6 @@
+# 구장 조회 라우터 연동 작업자 : 김병재
+# 최종 수정 일 : 2026-10-26
+
 import os
 from pathlib import Path
 
@@ -12,15 +15,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from FastAPI.management.management import router as management_router
 from FastAPI.inquiry.inquiry import router as inquiry_router
 
-app = FastAPI(title="공In중개사 관리자 API")
-
-app.include_router(management_router) # 매니저 및 회원관리 백엔드
-app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"]) # 문의 백엔드
 from FastAPI.login.admin_login import router as admin_login_router # 관리자 로그인
 from FastAPI.login.manager_login import router as manager_login_router # 매니저 로그인
 from FastAPI.match.match_manage import router as match_manage_router # 경기 관리 조회
 from FastAPI.match.attendance_check import router as attendance_check_router # 출석 체크 등록
 from FastAPI.match.match_score import router as match_score_router # 경기 결과기록 등록
+from FastAPI.match.ground_search import router as ground_search_router # 구장 조회
 
 app = FastAPI(title="공In중개사 관리자 API")
 
@@ -39,12 +39,14 @@ app.add_middleware(
 )
 
 # 기존 관리·관리자·매니저 기능 라우터를 그대로 등록합니다.
-app.include_router(management_router)
+app.include_router(management_router) # 매니저 및 회원관리 백엔드
+app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"]) # 문의 백엔드
 app.include_router(admin_login_router)
 app.include_router(manager_login_router)
 app.include_router(match_manage_router)
 app.include_router(attendance_check_router)
 app.include_router(match_score_router)
+app.include_router(ground_search_router, prefix="/match", tags=["Ground Search"]) # 구장 조회
 
 
 @app.get("/health", tags=["Health"])
