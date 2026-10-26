@@ -1,6 +1,9 @@
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 enum LoginRole {
-  headquarters('본사 관리자', 'admin', 'h'),
+  // 작업자 : 양태건
+  // 수정일 : 2026-10-26
+  // 본사 직원은 headquarter 계정으로 인증합니다.
+  headquarters('본사 직원', 'admin', 'h'),
   manager('매니저', 'manager', 'm');
 
   const LoginRole(this.label, this.path, this.fieldPrefix);

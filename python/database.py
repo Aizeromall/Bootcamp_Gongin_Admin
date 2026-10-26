@@ -11,6 +11,9 @@ def connect(found_rows: bool = False):
         user = os.getenv('DB_USER'),
         password =os.getenv('DB_PASSWORD'),
         database = os.getenv('DB_NAME'),
-        charset = 'utf8',
+        # 작업자 : 양태건
+        # 수정일 : 2026-10-26
+        # 부상 설명의 한글·이모지를 보존합니다.
+        charset = 'utf8mb4',
         client_flag = pymysql.constants.CLIENT.FOUND_ROWS if found_rows else 0
     )

@@ -8,11 +8,22 @@ import 'package:http/http.dart' as http;
 import '../model/login_role.dart';
 
 // 2026-10-26: 인증된 담당자와 역할을 한 세션에 보관합니다.
+// 작업자 : 양태건
+// 수정일 : 2026-10-26
+// [수정 시작] 인증 토큰을 담당자 세션에 함께 보관합니다.
 class StaffSession {
-  const StaffSession({required this.userId, required this.role, this.name});
+  const StaffSession({
+    required this.userId,
+    required this.role,
+    this.name,
+    this.accessToken,
+    this.department,
+  });
   final String userId;
   final LoginRole role;
   final String? name;
+  final String? accessToken;
+  final String? department;
 }
 
 final loginClientProvider = Provider<http.Client>((ref) {
@@ -67,19 +78,25 @@ class LoginNotifier extends Notifier<AsyncValue<StaffSession?>> {
     final data =
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     final userId = data['${role.fieldPrefix}_id'];
+    // 작업자 : 양태건
+    // 수정일 : 2026-10-26
+    // [수정 시작] 서버 역할과 매니저 부서가 일치해야 해당 화면으로 진입합니다.
     final returnedRole = data['role'];
     if (data['result'] != 'OK' ||
         userId is! String ||
         userId.isEmpty ||
-        (returnedRole != null && returnedRole != role.name)) {
+        returnedRole != role.name ||
+        (role == LoginRole.manager && data['m_department'] != '매니저')) {
       throw Exception('로그인 응답을 확인할 수 없습니다.');
     }
-    // 매니저 API는 현재 역할·이름을 반환하지 않아 인증된 API와 m_id를 사용합니다.
+    // 이름과 인증 토큰은 서버가 반환한 값을 사용합니다.
     final name = data['${role.fieldPrefix}_name'];
     return StaffSession(
       userId: userId,
       role: role,
       name: name is String && name.isNotEmpty ? name : null,
+      accessToken: data['access_token'] as String?,
+      department: data['${role.fieldPrefix}_department'] as String?,
     );
   }
 
@@ -110,3 +127,5 @@ class LoginNotifier extends Notifier<AsyncValue<StaffSession?>> {
   void reset() => state = const AsyncData(null);
 }
 // 최종 수정일 : 2026-10-24
+
+// [수정 끝]
