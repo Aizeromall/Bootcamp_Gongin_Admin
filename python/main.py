@@ -28,6 +28,10 @@ from FastAPI.approval.vacation import router as vacation_router
 from FastAPI.approval.groundapproval import router as ground_approval_router
 from FastAPI.approval.groundcontract import router as ground_contract_router
 from FastAPI.approval.groundshoot import router as ground_photo_router
+from FastAPI.announce.writeannounce import router as write_announce_router
+from FastAPI.announce.adminannounce import router as admin_announce_router
+from FastAPI.announce.mannagerannounce import router as manager_announce_router
+from FastAPI.appeal.appeal import router as appeal_router # 제재·이의신청 조회·재심의 시작
 
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
@@ -58,6 +62,9 @@ app.include_router(vacation_router)
 app.include_router(ground_approval_router)
 app.include_router(ground_contract_router)
 app.include_router(ground_photo_router)
+app.include_router(write_announce_router) # 공지 작성 / 작업자 : 최현준 / 작업 일 : 2026-10-27
+app.include_router(admin_announce_router) # 본사 공지 조회
+app.include_router(manager_announce_router) # 매니저 공지 조회
 app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"])
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
@@ -73,6 +80,7 @@ app.include_router(ground_search_router, prefix="/match", tags=["Ground Search"]
 app.include_router(match_cancel_router) # 구장 취소 내역 조회
 app.include_router(match_manage_cancel_router) # 매니저 매칭 취소
 app.include_router(report_router, prefix="/report", tags=["Report"]) # 신고 내역 조회·심의 시작
+app.include_router(appeal_router, prefix="/appeal", tags=["Appeal"]) # 제재·이의신청 조회·재심의 시작
 
 
 @app.get("/health", tags=["Health"])
