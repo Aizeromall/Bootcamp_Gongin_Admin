@@ -27,6 +27,7 @@ from FastAPI.report.report import router as report_router # 신고 내역 조회
 from FastAPI.announce.writeannounce import router as write_announce_router
 from FastAPI.announce.adminannounce import router as admin_announce_router
 from FastAPI.announce.mannagerannounce import router as manager_announce_router
+from FastAPI.appeal.appeal import router as appeal_router # 제재·이의신청 조회·재심의 시작
 
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
@@ -70,6 +71,7 @@ app.include_router(ground_search_router, prefix="/match", tags=["Ground Search"]
 app.include_router(match_cancel_router) # 구장 취소 내역 조회
 app.include_router(match_manage_cancel_router) # 매니저 매칭 취소
 app.include_router(report_router, prefix="/report", tags=["Report"]) # 신고 내역 조회·심의 시작
+app.include_router(appeal_router, prefix="/appeal", tags=["Appeal"]) # 제재·이의신청 조회·재심의 시작
 
 
 @app.get("/health", tags=["Health"])
