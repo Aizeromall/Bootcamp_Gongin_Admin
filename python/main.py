@@ -24,6 +24,10 @@ from FastAPI.match.ground_search import router as ground_search_router # 구장 
 from FastAPI.match.match_cancel import router as match_cancel_router # 구장 취소 내역 조회
 from FastAPI.match.match_manage_cancel import router as match_manage_cancel_router # 매니저 매칭 취소
 from FastAPI.report.report import router as report_router # 신고 내역 조회·심의 시작
+from FastAPI.approval.vacation import router as vacation_router
+from FastAPI.approval.groundapproval import router as ground_approval_router
+from FastAPI.approval.groundcontract import router as ground_contract_router
+from FastAPI.approval.groundshoot import router as ground_photo_router
 from FastAPI.announce.writeannounce import router as write_announce_router
 from FastAPI.announce.adminannounce import router as admin_announce_router
 from FastAPI.announce.mannagerannounce import router as manager_announce_router
@@ -53,6 +57,11 @@ app.add_middleware(
 
 # 기존 관리·관리자·매니저 기능 라우터를 그대로 등록합니다.
 app.include_router(management_router)
+# 작업자 : 최현준 / 작업 일 : 2026-10-27 / 휴가·구장 품의 및 사진 첨부
+app.include_router(vacation_router)
+app.include_router(ground_approval_router)
+app.include_router(ground_contract_router)
+app.include_router(ground_photo_router)
 app.include_router(write_announce_router) # 공지 작성 / 작업자 : 최현준 / 작업 일 : 2026-10-27
 app.include_router(admin_announce_router) # 본사 공지 조회
 app.include_router(manager_announce_router) # 매니저 공지 조회
