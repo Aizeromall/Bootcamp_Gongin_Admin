@@ -25,6 +25,7 @@ def ground_to_dict(row: dict) -> dict:
     return {
         "g_code": row["g_code"],                # 구장코드
         "g_name": row["g_name"],                # 구장명
+        "e_code": row.get("e_code"),    # 종목 (컬럼 적용 전 기존 조회도 유지) / 최현준 / 2026-10-27
         "g_address": row["g_address"],          # 주소
         "g_num": row["g_num"],                  # 수용인원
         "g_price": row["g_price"],              # 이용금액
@@ -45,7 +46,7 @@ def select_grounds(keyword: Optional[str] = None):
         connection = connect()  # DB 연결
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:  # SQL을 실행할 커서 (with가 끝나면 자동으로 닫힘)
             sql = """
-                SELECT g_code, g_name, g_address, g_num, g_price, g_information, g_time, g_lat, g_lng
+                SELECT *
                 FROM ground
             """
             params = ()
@@ -79,7 +80,7 @@ def select_ground(g_code: str):
         connection = connect()
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
             sql = """
-                SELECT g_code, g_name, g_address, g_num, g_price, g_information, g_time, g_lat, g_lng
+                SELECT *
                 FROM ground
                 WHERE g_code = %s
             """
@@ -100,4 +101,4 @@ def select_ground(g_code: str):
         if connection is not None:
             connection.close()
 
-# 최종 수정 일 : 2026-10-26
+# 최종 수정 일 : 2026-10-27

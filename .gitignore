@@ -394,3 +394,6 @@ ios/Flutter/flutter_export_environment.sh
 android/local.properties
 # Track the environment template
 !.env.example
+
+# 본사 직원이 첨부한 구장 사진 (서버 데이터)
+/uploads/
