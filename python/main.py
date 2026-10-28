@@ -34,6 +34,8 @@ from FastAPI.announce.writeannounce import router as write_announce_router
 from FastAPI.announce.adminannounce import router as admin_announce_router
 from FastAPI.announce.mannagerannounce import router as manager_announce_router
 from FastAPI.appeal.appeal import router as appeal_router # 제재·이의신청 조회·재심의 시작
+from FastAPI.images.insert_banner_image import router as insert_banner_image_router # 배너 이미지 등록
+from FastAPI.images.select_banner_image import router as select_banner_image_router # 배너 이미지 선택
 
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
@@ -85,6 +87,8 @@ app.include_router(team_management_router, prefix="/management", tags=["Team Man
 app.include_router(team_match_search_router, prefix="/match", tags=["Team Match Search"]) # 팀 대 팀 매칭 조회
 app.include_router(report_router, prefix="/report", tags=["Report"]) # 신고 내역 조회·심의 시작
 app.include_router(appeal_router, prefix="/appeal", tags=["Appeal"]) # 제재·이의신청 조회·재심의 시작
+app.include_router(insert_banner_image_router) # 배너 이미지 등록 (/images/banner)
+app.include_router(select_banner_image_router) # 배너 이미지 선택 (/images/banner-select)
 
 
 @app.get("/health", tags=["Health"])
