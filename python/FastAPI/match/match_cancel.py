@@ -15,7 +15,8 @@
 # 수정일 2026.10.28
 # reservation.r_c_category : 예약 취소 사유 (VARCHAR, 회원 앱과 같은 컬럼을 함께 사용)
 #   '1' = 정원 미달 / '2' = 우천·기상악화 / '3' = 노쇼 및 환불 → 매니저가 취소할 때 저장
-#   '4' = 기타 → 회원이 직접 취소한 내역 (구장 취소가 아니므로 이 API에서는 제외)
+#   그 외 (회원이 직접 쓴 글) = 회원 직접 취소 → 구장 취소가 아니므로 이 API에서는 제외
+#     ('0' ~ '3'은 회원 앱에서 입력을 막아 둠, 사유 이름은 "회원 개인 사정"으로 표시하고 원문은 보내지 않음)
 import logging
 from datetime import date, timedelta
 
@@ -34,13 +35,15 @@ CATEGORY_CANCELED = 2   # 취소
 # 중간 수정 작성자 - 신현진
 # 수정일 2026.10.28
 # 예약 취소 사유 이름 (DB의 r_c_category 값 → 앱에 표시할 이름)
-# r_c_category가 VARCHAR라서 '1' 같은 글자 키로 찾음 (숫자 키로 찾으면 전부 "기타"로 나옴)
+# r_c_category가 VARCHAR라서 '1' 같은 글자 키로 찾음 (숫자 키로 찾으면 전부 "회원 개인 사정"으로 나옴)
 CANCEL_CATEGORY_NAMES = {
     "1": "정원 미달",
     "2": "우천·기상악화",
     "3": "노쇼 및 환불",
 }
-# 매니저 취소로 보는 사유 조건 ('4' 기타·회원 직접 취소는 제외)
+# 1 ~ 3 코드가 아닌 사유(회원이 직접 쓴 글)의 표시 이름 (원문은 개인 정보가 있을 수 있어 보내지 않음)
+MEMBER_CANCEL_NAME = "회원 개인 사정"
+# 매니저 취소로 보는 사유 조건 (회원이 직접 쓴 글로 저장된 회원 취소는 제외)
 # 서버에서 정한 고정 문자열이라 SQL에 바로 넣어도 SQL 인젝션 위험 없음
 MANAGER_CANCEL_CONDITION = "r.r_c_category IN ('1', '2', '3')"
 
@@ -75,8 +78,8 @@ def cancel_match_to_dict(row: dict) -> dict:
         "rs_time": format_time(row["rs_time"]),          # 경기 시작 시간
         "re_time": format_time(row["re_time"]),          # 경기 종료 시간
         "r_c_category": str(row["r_c_category"]),        # 취소 사유 ('1' / '2' / '3')
-        # str() : 글자 키로 이름을 찾음 (2026.10.28 신현진)
-        "r_c_category_name": CANCEL_CATEGORY_NAMES.get(str(row["r_c_category"]), "기타"),  # 취소 사유 이름 (앱에서 바로 표시)
+        # str() : 글자 키로 이름을 찾고, 1 ~ 3 코드가 아니면 "회원 개인 사정" (2026.10.28 신현진)
+        "r_c_category_name": CANCEL_CATEGORY_NAMES.get(str(row["r_c_category"]), MEMBER_CANCEL_NAME),  # 취소 사유 이름 (앱에서 바로 표시)
         "canceled_count": row["canceled_count"],         # 취소된 예약 수 (경기에 예약했던 회원 수)
         "r_check": bool(row["r_check"]),                 # 취소 전 매치 성사 여부 (DB 0/1 → false/true)
         "r_cancel_date": row["r_cancel_date"],           # 취소일
@@ -87,7 +90,7 @@ def cancel_match_to_dict(row: dict) -> dict:
 # r / g 는 테이블 별칭 (reservation / ground)
 # 중간 수정 작성자 - 신현진
 # 수정일 2026.10.28
-# r_c_category IN ('1', '2', '3') : 매니저가 사유를 넣어 취소한 예약만 ('4' 기타·회원 직접 취소 제외)
+# r_c_category IN ('1', '2', '3') : 매니저가 사유를 넣어 취소한 예약만 (회원이 직접 쓴 글로 저장된 회원 취소 제외)
 # GROUP BY는 조건을 붙인 뒤 각 API에서 추가 (회원별 예약 여러 줄을 경기 1줄로 묶음)
 CANCEL_MATCH_SELECT = f"""
     SELECT r.g_code, g.g_name, g.g_address, g.g_num,
@@ -177,7 +180,7 @@ def select_canceled_match_detail(
             # LEFT JOIN c_result_record : 출석 체크 전에 취소된 회원도 빠지지 않고 나옴 (출석 값은 None)
             # 중간 수정 작성자 - 신현진
             # 수정일 2026.10.28
-            # r_c_category IN ('1', '2', '3') : 그 전에 회원이 직접 취소한 예약('4' 기타)은 제외
+            # r_c_category IN ('1', '2', '3') : 그 전에 회원이 직접 취소한 예약(회원이 쓴 글로 저장)은 제외
             sql = f"""
                 SELECT r.r_seq, r.c_id_seq, c.c_name, c.c_phone,
                     r.r_cancel_date, p.p_seq, cr.c_r_r_attendance

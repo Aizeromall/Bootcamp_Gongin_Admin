@@ -12,7 +12,8 @@
 # 수정일 2026.10.28
 # reservation.r_c_category : 예약 취소 사유 (VARCHAR, 회원 앱과 같은 컬럼을 함께 사용)
 #   매니저가 취소할 때는 '1' / '2' / '3' 코드만 저장
-#   '4' 기타 = 회원이 직접 취소한 내역 (회원 앱에서 저장) → 매니저 취소가 아니므로 이 API의 조회에서 제외
+#   그 외 (회원이 직접 쓴 글) = 회원 직접 취소 (회원 앱에서 저장) → 매니저 취소가 아니므로 이 API의 조회에서 제외
+#     ('0' ~ '3'은 회원 앱에서 입력을 막아 둠, 사유 이름은 "회원 개인 사정"으로 표시하고 원문은 보내지 않음)
 #   1 = 정원 미달       : 예약 인원이 구장 정원(g_num)보다 적은 경기
 #                         (정원이 안 차도 참가 회원들이 진행을 원하면 취소하지 않고 그대로 진행)
 #   2 = 우천·기상악화   : 불가피한 상황이라 성사 여부(r_check)와 상관없이 취소 가능
@@ -45,13 +46,15 @@ CANCEL_NO_SHOW = 3          # 노쇼 및 환불
 # 중간 수정 작성자 - 신현진
 # 수정일 2026.10.28
 # r_c_category가 VARCHAR라서 DB에는 '1' 같은 글자로 저장되고 조회됨
-# → 사유 이름도 글자 키로 찾음 (숫자 키로 찾으면 '1'을 못 찾아서 전부 "기타"로 나옴)
+# → 사유 이름도 글자 키로 찾음 (숫자 키로 찾으면 '1'을 못 찾아서 전부 "회원 개인 사정"으로 나옴)
 CANCEL_CATEGORY_NAMES = {
     "1": "정원 미달",
     "2": "우천·기상악화",
     "3": "노쇼 및 환불",
 }
-# 매니저 취소로 보는 사유 조건 ('4' 기타·회원 직접 취소는 제외)
+# 1 ~ 3 코드가 아닌 사유(회원이 직접 쓴 글)의 표시 이름 (원문은 개인 정보가 있을 수 있어 보내지 않음)
+MEMBER_CANCEL_NAME = "회원 개인 사정"
+# 매니저 취소로 보는 사유 조건 (회원이 직접 쓴 글로 저장된 회원 취소는 제외)
 # 서버에서 정한 고정 문자열이라 SQL에 바로 넣어도 SQL 인젝션 위험 없음
 MANAGER_CANCEL_CONDITION = "r.r_c_category IN ('1', '2', '3')"
 
@@ -239,7 +242,7 @@ def cancel_match(m_id: str, cancel: MatchCancel):
 # 매니저 담당 구장에서 취소된 경기 목록 조회
 # 중간 수정 작성자 - 신현진
 # 수정일 2026.10.28
-# r_c_category IN ('1', '2', '3') : 매니저가 취소한 경기만 ('4' 기타·회원이 직접 취소한 예약은 제외)
+# r_c_category IN ('1', '2', '3') : 매니저가 취소한 경기만 (회원이 직접 쓴 글로 저장된 회원 취소는 제외)
 # GROUP BY : 회원별 예약 여러 줄을 경기(구장·날짜·시작시간·사유) 1줄로 묶음
 # 예: /match/manage/cancel/manager01                  전체 취소 경기
 #     /match/manage/cancel/manager01?r_c_category=3   노쇼 및 환불로 취소된 경기만
@@ -295,8 +298,8 @@ def select_canceled_matches(
                 "rs_time": format_time(row["rs_time"]),                      # 경기 시작 시간
                 "re_time": format_time(row["re_time"]),                      # 경기 종료 시간
                 "r_c_category": str(row["r_c_category"]),                    # 취소 사유 ('1' / '2' / '3')
-                # str() : 글자 키로 이름을 찾음 (2026.10.28 신현진)
-                "r_c_category_name": CANCEL_CATEGORY_NAMES.get(str(row["r_c_category"]), "기타"),  # 취소 사유 이름
+                # str() : 글자 키로 이름을 찾고, 1 ~ 3 코드가 아니면 "회원 개인 사정" (2026.10.28 신현진)
+                "r_c_category_name": CANCEL_CATEGORY_NAMES.get(str(row["r_c_category"]), MEMBER_CANCEL_NAME),  # 취소 사유 이름
                 "canceled_count": row["canceled_count"],                     # 취소된 예약 수
                 "r_cancel_date": row["r_cancel_date"],                       # 취소일
             })
