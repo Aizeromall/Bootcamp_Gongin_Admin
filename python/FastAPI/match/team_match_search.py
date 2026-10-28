@@ -31,6 +31,12 @@
 #      예약 후 경기 전에 팀장이 바뀌면 예약은 예전 팀장 ID로 남아 있어서
 #      현재 팀장만이 아니라 "팀장 이력 전체"(팀 개설 회원 + 팀장 변경 기록)에서 예약한 회원을 찾음
 #      (예전 팀장 ID는 예약을 찾는 데만 쓰고 응답에는 넣지 않음 → 화면에는 현재 팀장만 보임)
+#   중간 수정 작성자 - 신현진
+#   수정일 2026.10.28
+#   공용 DB 기준으로 변경
+#     - reservation에는 매니저 컬럼이 없어서, 구장대여 예약의 담당 매니저는
+#       회원 앱과 같은 배정표(assign의 요일 a_day · 시간 a_time) 기준으로 찾음 (match_schedule.py 공용 SQL)
+#     - 구장대여(reservation_category = 2)만 찾고, 취소 여부도 회원 앱과 같은 기준으로 확인
 #
 # [진행 상태] DB에 저장된 값이 아니라 경기 일시와 결과 기록으로 계산
 #   scheduled      경기 예정 : 경기 시작 일시가 아직 안 됨 (일시가 비어 있어도 예정으로 봄)
@@ -49,13 +55,17 @@ from database import connect  # 공용 DB 연결 함수 (python/database.py)
 #   match_result    : 우리팀 점수와 상대팀 점수로 승/무/패 결정
 #   load_team_stats : 전체 팀 전적·승률·등급 계산 / empty_stats : 경기 기록이 없는 팀의 기본 전적
 from FastAPI.management.team_management import empty_stats, load_team_stats, match_result, parse_score
+# 중간 수정 작성자 - 신현진
+# 수정일 2026.10.28
+# 매니저 구장 일정 API와 같은 기준을 쓰기 위해 공용 값·SQL을 가져옴
+#   ASSIGNED_MANAGER_SQL   : 예약 날짜·시간에 배정된 담당 매니저 (assign 요일·시간 기준)
+#   NOT_CANCELED_CONDITION : 취소되지 않은 예약 조건 (회원 앱과 같은 기준)
+#   RESERVATION_RENTAL     : 예약 구분 2 = 구장대여
+from FastAPI.match.match_schedule import ASSIGNED_MANAGER_SQL, NOT_CANCELED_CONDITION, RESERVATION_RENTAL
 
 # 이 파일의 API들을 담는 라우터 (main.py에서 prefix="/match"로 등록)
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# 예약 구분 값 (reservation.r_category, 1 예약 / 2 취소)
-CATEGORY_RESERVED = 1
 
 # 진행 상태 값과 이름 (앱에서 배지로 바로 표시)
 STATUS_SCHEDULED = "scheduled"
@@ -86,18 +96,21 @@ CAPTAIN_ID_SQL = """
 
 # 홈 팀 팀장이 한 구장대여 예약번호를 찾는 SQL 조각 (위 [구장·담당 매니저] 2번)
 #   r.r_date = DATE(경기 시작 일시) AND r.rs_time = TIME(경기 시작 일시) : 같은 날짜·시작 시간
-#   r.r_check = 1 : 팀 매칭이 성사된 예약 / r.r_category = 1 : 취소되지 않은 예약
+#   r.r_check = 1 : 팀 매칭이 성사된 예약
+#   중간 수정 작성자 - 신현진 / 수정일 2026.10.28
+#   r.reservation_category = 2 : 구장대여 예약만 / NOT_CANCELED_CONDITION : 취소되지 않은 예약 (회원 앱 기준)
 #   r.c_id_seq IN (...) : 홈 팀의 팀장 이력 전체 (팀 개설 회원 + 팀장 변경 기록의 모든 팀장)
 #     UNION : 두 SELECT 결과를 하나로 합침 (같은 회원은 한 번만)
 #   ORDER BY r_seq DESC LIMIT 1 : 혹시 여러 건이 걸려도 가장 최근 예약 1건만 사용 → 매치 1건당 1줄 유지
-RENTAL_SEQ_SQL = """
+RENTAL_SEQ_SQL = f"""
     (
         SELECT r.r_seq
         FROM reservation AS r
         WHERE r.r_date = DATE(tm.team_start)
             AND r.rs_time = TIME(tm.team_start)
             AND r.r_check = 1
-            AND r.r_category = {category}
+            AND r.reservation_category = {RESERVATION_RENTAL}
+            AND {NOT_CANCELED_CONDITION}
             AND r.c_id_seq IN (
                 SELECT tc2.c_id_seq FROM team_create AS tc2 WHERE tc2.t_id = tm.home_t_id
                 UNION
@@ -106,7 +119,7 @@ RENTAL_SEQ_SQL = """
         ORDER BY r.r_seq DESC
         LIMIT 1
     )
-""".format(category=CATEGORY_RESERVED)
+"""
 
 # 팀 매칭 목록·상세에서 공통으로 쓰는 SELECT
 # 안쪽 SELECT(base) : 매치 정보 + 홈/원정 팀 이름·로고 + 홈/원정 현재 팀장 ID + 구장대여 예약번호
@@ -115,13 +128,15 @@ RENTAL_SEQ_SQL = """
 # 바깥 SELECT
 #   hc / ac : 현재 팀장 (customer) → 이름·전화번호 (hc = 홈 팀장, ac = 원정 팀장)
 #   rv / rg / rm : 구장대여 예약 (reservation) → 구장(ground)·담당 매니저(match_manager)
+#   중간 수정 작성자 - 신현진 / 수정일 2026.10.28
+#   rm : 예약에 매니저 컬럼이 없어서 배정표(assign) 기준으로 찾은 담당 매니저 (ASSIGNED_MANAGER_SQL)
 #   LEFT JOIN : 예약을 못 찾아도 매치는 빠지지 않고 나옴 (구장·매니저 값은 None)
 TEAM_MATCH_SELECT = f"""
     SELECT base.*,
         hc.c_name AS home_captain_name, hc.c_phone AS home_captain_phone,
         ac.c_name AS away_captain_name, ac.c_phone AS away_captain_phone,
         rv.g_code AS rental_g_code, rg.g_name AS rental_g_name,
-        rv.m_id AS rental_m_id, rm.m_name AS rental_m_name
+        rm.m_id AS rental_m_id, rm.m_name AS rental_m_name
     FROM (
         SELECT tm.team_code, tm.team_num, tm.team_start, tm.team_end,
             tm.home_t_id, ht.t_name AS home_t_name, ht.t_logo AS home_t_logo,
@@ -137,7 +152,7 @@ TEAM_MATCH_SELECT = f"""
     LEFT JOIN customer AS ac ON ac.c_id_seq = base.away_captain_id
     LEFT JOIN reservation AS rv ON rv.r_seq = base.rental_r_seq
     LEFT JOIN ground AS rg ON rg.g_code = rv.g_code
-    LEFT JOIN match_manager AS rm ON rm.m_id = rv.m_id
+    LEFT JOIN match_manager AS rm ON rm.m_id = {ASSIGNED_MANAGER_SQL.format(alias="rv")}
 """
 
 
