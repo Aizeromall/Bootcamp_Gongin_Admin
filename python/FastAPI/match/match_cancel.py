@@ -11,9 +11,11 @@
 #
 # reservation.r_category : 예약 구분
 #   1 = 예약 / 2 = 취소 (취소해도 행을 지우지 않고 r_category만 2로 바꿔서 취소 내역을 조회할 수 있게 함)
-# reservation.r_c_category : 예약 취소 사유 (매니저가 취소할 때 저장)
-#   1 = 정원 미달 / 2 = 우천·기상악화 / 3 = 노쇼 및 환불
-#   회원이 직접 취소한 예약은 NULL → 구장 취소가 아니므로 이 API에서는 제외
+# 중간 수정 작성자 - 신현진
+# 수정일 2026.10.28
+# reservation.r_c_category : 예약 취소 사유 (VARCHAR, 회원 앱과 같은 컬럼을 함께 사용)
+#   '1' = 정원 미달 / '2' = 우천·기상악화 / '3' = 노쇼 및 환불 → 매니저가 취소할 때 저장
+#   '4' = 기타 → 회원이 직접 취소한 내역 (구장 취소가 아니므로 이 API에서는 제외)
 import logging
 from datetime import date, timedelta
 
@@ -29,12 +31,18 @@ logger = logging.getLogger(__name__)
 # 예약 구분 값 (DB의 r_category 숫자에 이름을 붙여서 코드에서 1, 2를 직접 쓰지 않게 함)
 CATEGORY_CANCELED = 2   # 취소
 
+# 중간 수정 작성자 - 신현진
+# 수정일 2026.10.28
 # 예약 취소 사유 이름 (DB의 r_c_category 값 → 앱에 표시할 이름)
+# r_c_category가 VARCHAR라서 '1' 같은 글자 키로 찾음 (숫자 키로 찾으면 전부 "기타"로 나옴)
 CANCEL_CATEGORY_NAMES = {
-    1: "정원 미달",
-    2: "우천·기상악화",
-    3: "노쇼 및 환불",
+    "1": "정원 미달",
+    "2": "우천·기상악화",
+    "3": "노쇼 및 환불",
 }
+# 매니저 취소로 보는 사유 조건 ('4' 기타·회원 직접 취소는 제외)
+# 서버에서 정한 고정 문자열이라 SQL에 바로 넣어도 SQL 인젝션 위험 없음
+MANAGER_CANCEL_CONDITION = "r.r_c_category IN ('1', '2', '3')"
 
 # 출석 체크 기록(c_result_record)의 경기 코드와 같은 형식 : 구장코드_YYYYMMDD_HHMMSS
 # attendance_check.py에서 만드는 c_r_r_code와 똑같이 맞춰야 회원별 출석(노쇼) 기록을 찾을 수 있음
@@ -66,8 +74,9 @@ def cancel_match_to_dict(row: dict) -> dict:
         "r_date": row["r_date"],                         # 경기일 (취소해도 그대로 유지)
         "rs_time": format_time(row["rs_time"]),          # 경기 시작 시간
         "re_time": format_time(row["re_time"]),          # 경기 종료 시간
-        "r_c_category": row["r_c_category"],             # 취소 사유 (1 / 2 / 3)
-        "r_c_category_name": CANCEL_CATEGORY_NAMES.get(row["r_c_category"], "기타"),  # 취소 사유 이름 (앱에서 바로 표시)
+        "r_c_category": str(row["r_c_category"]),        # 취소 사유 ('1' / '2' / '3')
+        # str() : 글자 키로 이름을 찾음 (2026.10.28 신현진)
+        "r_c_category_name": CANCEL_CATEGORY_NAMES.get(str(row["r_c_category"]), "기타"),  # 취소 사유 이름 (앱에서 바로 표시)
         "canceled_count": row["canceled_count"],         # 취소된 예약 수 (경기에 예약했던 회원 수)
         "r_check": bool(row["r_check"]),                 # 취소 전 매치 성사 여부 (DB 0/1 → false/true)
         "r_cancel_date": row["r_cancel_date"],           # 취소일
@@ -76,9 +85,11 @@ def cancel_match_to_dict(row: dict) -> dict:
 
 # 취소 경기 조회에서 공통으로 쓰는 SELECT
 # r / g 는 테이블 별칭 (reservation / ground)
-# r_c_category IS NOT NULL : 매니저가 사유를 넣어 취소한 예약만 (회원 직접 취소 제외)
+# 중간 수정 작성자 - 신현진
+# 수정일 2026.10.28
+# r_c_category IN ('1', '2', '3') : 매니저가 사유를 넣어 취소한 예약만 ('4' 기타·회원 직접 취소 제외)
 # GROUP BY는 조건을 붙인 뒤 각 API에서 추가 (회원별 예약 여러 줄을 경기 1줄로 묶음)
-CANCEL_MATCH_SELECT = """
+CANCEL_MATCH_SELECT = f"""
     SELECT r.g_code, g.g_name, g.g_address, g.g_num,
         r.r_date, r.rs_time, r.re_time, r.r_c_category,
         COUNT(*) AS canceled_count,
@@ -87,7 +98,7 @@ CANCEL_MATCH_SELECT = """
     FROM reservation AS r
     INNER JOIN ground AS g ON g.g_code = r.g_code
     WHERE r.r_category = %s
-        AND r.r_c_category IS NOT NULL
+        AND {MANAGER_CANCEL_CONDITION}
 """
 CANCEL_MATCH_GROUP_BY = """
     GROUP BY r.g_code, g.g_name, g.g_address, g.g_num,
@@ -115,7 +126,7 @@ def select_canceled_matches(
             # 취소 사유를 보낸 경우에만 조건 추가
             if r_c_category is not None:
                 sql += " AND r.r_c_category = %s"
-                params.append(r_c_category)
+                params.append(str(r_c_category))  # VARCHAR 컬럼과 같은 글자로 비교 (2026.10.28 신현진)
             # 구장코드를 보낸 경우에만 조건 추가
             if g_code:
                 sql += " AND r.g_code = %s"
@@ -164,7 +175,9 @@ def select_canceled_match_detail(
             # INNER JOIN customer : 회원 이름·전화번호를 함께 가져옴
             # LEFT JOIN pay : 환불(결제 삭제)된 예약도 빠지지 않고 나옴 (결제 값은 None)
             # LEFT JOIN c_result_record : 출석 체크 전에 취소된 회원도 빠지지 않고 나옴 (출석 값은 None)
-            # r_c_category IS NOT NULL : 그 전에 회원이 직접 취소한 예약은 제외
+            # 중간 수정 작성자 - 신현진
+            # 수정일 2026.10.28
+            # r_c_category IN ('1', '2', '3') : 그 전에 회원이 직접 취소한 예약('4' 기타)은 제외
             sql = f"""
                 SELECT r.r_seq, r.c_id_seq, c.c_name, c.c_phone,
                     r.r_cancel_date, p.p_seq, cr.c_r_r_attendance
@@ -177,7 +190,7 @@ def select_canceled_match_detail(
                     AND cr.c_r_r_code = {RECORD_CODE}
                 WHERE r.g_code = %s AND r.r_date = %s AND r.rs_time = %s
                     AND r.r_category = %s
-                    AND r.r_c_category IS NOT NULL
+                    AND {MANAGER_CANCEL_CONDITION}
                 ORDER BY r.r_seq
             """
             cursor.execute(sql, (g_code, r_date, rs_time, CATEGORY_CANCELED))
@@ -215,4 +228,4 @@ def select_canceled_match_detail(
         if connection is not None:
             connection.close()
 
-# 최종 수정 일 : 2026-10-26
+# 최종 수정 일 : 2026-10-28
