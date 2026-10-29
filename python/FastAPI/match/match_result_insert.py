@@ -207,6 +207,7 @@ def team_new_rating(rating: int, opponent_rating: int, result: float) -> int:
 #       scores["A"], scores["B"], match_code=경기코드)
 #   match_code : 경기코드를 주면 그 경기의 회원 결과 기록(c_result_record)에 반영 전 / 후 점수도 저장
 #                (기록 줄이 먼저 저장돼 있어야 함, 2026.10.29 신현진)
+#                결석 회원 기록(같은 경기코드, 점수가 빈 줄)은 전 = 후 = 현재 c_rating으로 저장 (2026.10.29 신현진)
 def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_a: int, score_b: int,
                          match_code: Optional[str] = None) -> list:
     if e_code not in STAT_KEYS:
@@ -267,6 +268,26 @@ def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_
                 "tier_before": rating_tier(before),      # 경기 전 등급
                 "tier_after": rating_tier(after),        # 경기 후 등급
             })
+
+    # 중간 수정 작성자 - 신현진
+    # 수정일 2026.10.29
+    # 4) 결석한 회원 기록에도 전 / 후 점수 저장 (점수 미반영 → 전 = 후 = 그 회원의 현재 c_rating)
+    #    출석 회원은 위 3)에서 이미 저장했으므로, 그 경기 기록 중 점수가 아직 비어 있는 줄이 결석 회원
+    #    DB 기본값(1500)을 쓰면 실제 점수가 다른 회원도 1500으로 보이므로 회원의 현재 점수로 채움
+    #    (회원 앱의 점수 변동 목록·추이 그래프에 결석 경기도 실제 점수로 이어서 표시)
+    #    팀 매치 결과 등록은 참가 회원 기록만 저장하므로 해당하는 줄이 없음
+    if match_code is not None:
+        cursor.execute(
+            """
+            UPDATE c_result_record AS r
+            INNER JOIN customer AS c ON c.c_id_seq = r.c_id_seq
+            SET r.c_r_r_rating_before = COALESCE(c.c_rating, %s),
+                r.c_r_r_rating_after = COALESCE(c.c_rating, %s)
+            WHERE r.c_r_r_code = %s
+                AND r.c_r_r_rating_before IS NULL AND r.c_r_r_rating_after IS NULL
+            """,
+            (RATING_START, RATING_START, match_code),
+        )
     return changes
 
 
