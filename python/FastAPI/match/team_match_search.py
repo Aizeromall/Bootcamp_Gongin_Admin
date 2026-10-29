@@ -5,7 +5,7 @@
 #   GET /match/team_match                     성사된 팀 매칭 목록 (홈·원정 팀, 경기 일시·구장·담당 매니저, 진행 상태, 결과)
 #       ?status= scheduled 경기 예정 / waiting_result 결과 대기 / finished 경기 종료 (안 보내면 전체)
 #       ?t_id= 특정 팀이 홈 또는 원정으로 참여한 매칭만 / ?keyword= 홈 또는 원정 팀 이름 검색
-#   GET /match/team_match/{team_code}         팀 매칭 1건 상세 (두 팀 정보·전적 + 경기 결과)
+#   GET /match/team_match/{team_code}         팀 매칭 1건 상세 (두 팀 정보·전적 + 경기 결과 + 참가 회원별 기록)
 # 조회만 하고 받는 값(body)이 없어서 BaseModel class 없음
 # 팀 매칭 신청·수락은 회원 앱(Bootcamp_Gongin_User team_match_connect.py)에서 처리하고, 본사는 이 API로 조회만 함
 #
@@ -18,6 +18,10 @@
 #   t_result_record  : 팀 경기 결과 (팀마다 1줄씩 저장)
 #                      t_r_r_m_code(경기코드) = team_match.team_code 로 두 팀 결과를 매치와 연결
 #                      t_r_r_score "우리팀점수:상대팀점수" / m_id 담당 매니저 / g_code 경기 구장
+#   c_result_record  : 참가 회원별 경기 기록 (c_r_r_code = team_code, 상세 조회에서만 사용)
+#                      c_r_r_team 결과 등록 당시 팀 이름 / c_r_r_statcode "G:1,A:0,..." / c_r_r_attendance 출석
+#                      c_r_r_rating_before / after 그 경기 반영 전 / 후 회원 점수 (2026.10.29 추가)
+#   t_result_record.t_r_r_rating_after : 그 경기 반영 후 팀 점수 (2026.10.29 추가, 전 점수는 직전 기록의 후 점수)
 #
 # [팀장]
 #   화면에 보여주는 팀장 = 현재 팀장 (team_captain_change의 가장 최근 1줄, 기록이 없으면 팀을 개설한 회원)
@@ -76,6 +80,9 @@ STATUS_NAMES = {
     STATUS_WAITING_RESULT: "결과 대기",
     STATUS_FINISHED: "경기 종료",
 }
+
+# 팀 시작 점수 (match_result_insert.py RATING_START와 같은 값, 순환 import를 피하려고 따로 둠 - 2026.10.29 신현진)
+TEAM_RATING_START = 1500
 
 # 팀의 현재 팀장 ID를 구하는 SQL 조각 (팀 관리 API와 같은 기준)
 #   COALESCE(A, B) : A가 NULL이면 B를 사용
@@ -166,10 +173,19 @@ def load_match_results(cursor, team_codes: list) -> dict:
     placeholders = ", ".join(["%s"] * len(team_codes))
     # placeholders는 "%s" 문자열만 들어가므로 f-string을 써도 SQL 인젝션 위험 없음
     # rr / mm / g 는 테이블 별칭 (t_result_record / match_manager / ground)
+    # 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
+    # t_r_r_rating_after : 그 경기 반영 후 팀 점수
+    # prev_count / prev_rating_after : 같은 팀의 직전 결과 기록 수 / 직전 기록의 후 점수 (= 이번 경기 전 점수)
+    #   팀 기록은 결과 등록 순서대로 쌓이므로 t_r_r_seq가 작은 쪽이 먼저 반영된 경기
     cursor.execute(
         f"""
         SELECT rr.t_r_r_m_code, rr.t_id, rr.t_r_r_score, rr.t_r_r_date,
-            rr.m_id, mm.m_name, rr.g_code, g.g_name
+            rr.m_id, mm.m_name, rr.g_code, g.g_name, rr.t_r_r_rating_after,
+            (SELECT COUNT(*) FROM t_result_record AS pv
+             WHERE pv.t_id = rr.t_id AND pv.t_r_r_seq < rr.t_r_r_seq) AS prev_count,
+            (SELECT pv.t_r_r_rating_after FROM t_result_record AS pv
+             WHERE pv.t_id = rr.t_id AND pv.t_r_r_seq < rr.t_r_r_seq
+             ORDER BY pv.t_r_r_seq DESC LIMIT 1) AS prev_rating_after
         FROM t_result_record AS rr
         LEFT JOIN match_manager AS mm ON mm.m_id = rr.m_id
         LEFT JOIN ground AS g ON g.g_code = rr.g_code
@@ -179,6 +195,24 @@ def load_match_results(cursor, team_codes: list) -> dict:
         [str(code) for code in team_codes],
     )
     return {(row["t_r_r_m_code"], row["t_id"]): row for row in cursor.fetchall()}
+
+
+# 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
+# 팀 결과 기록 1줄 → 그 경기 반영 전 / 후 팀 점수와 변동
+#   전 점수 = 직전 기록의 후 점수 (직전 기록이 없으면 시작 점수 1500)
+#   후 점수 또는 직전 기록의 후 점수가 NULL(컬럼 추가 전 기록)이면 변동은 None
+def team_rating_change(record: Optional[dict]) -> dict:
+    after = record["t_r_r_rating_after"] if record else None
+    if record is None or record["prev_count"] == 0:
+        before = TEAM_RATING_START if after is not None else None
+    else:
+        before = record["prev_rating_after"]
+    has_change = before is not None and after is not None
+    return {
+        "rating_before": before,                              # 경기 전 팀 점수
+        "rating_after": after,                                # 경기 후 팀 점수
+        "rating_change": after - before if has_change else None,  # 팀 점수 변동
+    }
 
 
 # 홈 팀 / 원정 팀 결과 기록으로 경기 결과 정리 (결과가 없으면 None)
@@ -206,8 +240,74 @@ def build_result(home_record: Optional[dict], away_record: Optional[dict]):
         "home_result": match_result(home_score, away_score) if has_score else None,  # 홈 팀 기준 승/무/패
         "away_result": match_result(away_score, home_score) if has_score else None,  # 원정 팀 기준 승/무/패
         "t_r_r_date": record["t_r_r_date"],                                     # 결과 등록일
+        "home_rating": team_rating_change(home_record),                         # 홈 팀 점수 전 / 후 / 변동 (2026.10.29 신현진)
+        "away_rating": team_rating_change(away_record),                         # 원정 팀 점수 전 / 후 / 변동
     }
     return result, record
+
+
+# 중간 수정 작성자 - 신현진
+# 수정일 2026.10.29
+# 팀 경기의 참가 회원별 기록 → 홈 / 원정 팀별 목록 (결과 등록 전이면 빈 목록)
+#   팀 구분 1) c_r_r_team(결과 등록 당시 팀 이름)이 홈 / 원정 팀 이름과 같은 쪽
+#           2) 경기 뒤 팀 이름이 바뀌었으면 현재 두 팀 중 가입된 팀 (t_register)
+#           3) 둘 다 아니면 other (팀을 탈퇴한 회원 등, 기록이 빠지지 않게 따로 보냄)
+#   그 경기 반영 전 / 후 점수(c_r_r_rating_before / after)와 변동 + 현재 등급 점수(c_rating)·등급
+#   컬럼 추가 전에 등록된 경기는 전 / 후 점수가 NULL → 변동도 None (앱에서 '변동 기록 없음')
+def load_match_players(cursor, row: dict) -> dict:
+    # match_result_insert.py가 이 파일의 TEAM_MATCH_SELECT를 가져다 쓰기 때문에
+    # 파일 맨 위에서 가져오면 서로를 먼저 불러오려는 순환 import 에러가 나서 함수 안에서 가져옴
+    from FastAPI.match.match_result_insert import RATING_START, rating_tier, unpack_statcode
+
+    # register_t_id : 이 회원이 지금 가입된 팀 (홈 / 원정 중 하나, 없으면 None)
+    cursor.execute(
+        """
+        SELECT cr.c_id_seq, c.c_name, c.c_rating, cr.c_r_r_team, cr.e_code,
+            cr.c_r_r_statcode, cr.c_r_r_attendance, cr.c_r_r_rating_before, cr.c_r_r_rating_after,
+            (
+                SELECT tr.t_id
+                FROM t_register AS tr
+                WHERE tr.c_id_seq = cr.c_id_seq AND tr.t_id IN (%s, %s)
+                LIMIT 1
+            ) AS register_t_id
+        FROM c_result_record AS cr
+        LEFT JOIN customer AS c ON c.c_id_seq = cr.c_id_seq
+        WHERE cr.c_r_r_code = %s
+        ORDER BY cr.c_r_r_seq
+        """,
+        (row["home_t_id"], row["away_t_id"], str(row["team_code"])),
+    )
+    players = {"home": [], "away": [], "other": []}
+    for item in cursor.fetchall():
+        if row["home_t_name"] and item["c_r_r_team"] == row["home_t_name"]:
+            side = "home"
+        elif row["away_t_name"] and item["c_r_r_team"] == row["away_t_name"]:
+            side = "away"
+        elif item["register_t_id"] == row["home_t_id"]:
+            side = "home"
+        elif item["register_t_id"] == row["away_t_id"]:
+            side = "away"
+        else:
+            side = "other"
+        rating = item["c_rating"] if item["c_rating"] is not None else RATING_START
+        before, after = item["c_r_r_rating_before"], item["c_r_r_rating_after"]
+        has_change = before is not None and after is not None
+        players[side].append({
+            "c_id_seq": item["c_id_seq"],                         # 회원ID (종목별 ID)
+            "c_name": item["c_name"],                             # 회원 이름 (탈퇴 등으로 없으면 None)
+            "c_r_r_team": item["c_r_r_team"],                     # 결과 등록 당시 팀 이름
+            "e_code": item["e_code"],                             # 종목코드
+            "statcode": item["c_r_r_statcode"],                   # 스탯코드 원본
+            "stats": unpack_statcode(item["c_r_r_statcode"]),     # 스탯 {"G": 1, "A": 0, ...}
+            "attendance": bool(item["c_r_r_attendance"]),         # 출석 여부
+            "rating_before": before,                              # 그 경기 반영 전 점수 (기록 없으면 None)
+            "rating_after": after,                                # 그 경기 반영 후 점수
+            "rating_change": after - before if has_change else None,  # 그 경기 점수 변동
+            "tier_after": rating_tier(after) if after is not None else None,  # 그 경기 후 등급
+            "c_rating": rating,                                   # 현재 등급 점수
+            "tier": rating_tier(rating),                          # 현재 등급
+        })
+    return players
 
 
 # 경기 일시와 결과로 진행 상태 계산 (위 [진행 상태] 기준)
@@ -372,6 +472,9 @@ def select_team_match(team_code: int):
             results = load_match_results(cursor, [row["team_code"]])
             stats = load_team_stats(cursor)
 
+            # 4) 참가 회원별 기록 (중간 수정 작성자 - 신현진 / 수정일 2026.10.29)
+            players = load_match_players(cursor, row)
+
         match = team_match_to_dict(row, results, stats)
         # 상세에서는 두 팀의 팀원 수와 전적을 함께 보냄 (상대 전력 비교용)
         for side in ("home", "away"):
@@ -382,6 +485,8 @@ def select_team_match(team_code: int):
             team["draws"] = team_stats["draws"]                        # 무
             team["losses"] = team_stats["losses"]                      # 패
             team["win_rate"] = team_stats["win_rate"]                  # 승률 (경기 기록이 없으면 None)
+            team["players"] = players[side]                            # 참가 회원별 기록 (결과 등록 전이면 [])
+        match["other_players"] = players["other"]                      # 어느 팀인지 확인할 수 없는 회원 기록
         return match
     except HTTPException:
         raise  # 위에서 만든 404는 500으로 바뀌지 않게 그대로 전달
@@ -395,4 +500,4 @@ def select_team_match(team_code: int):
         if connection is not None:
             connection.close()
 
-# 최종 수정 일 : 2026-10-28
+# 최종 수정 일 : 2026-10-29
