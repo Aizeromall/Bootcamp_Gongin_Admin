@@ -26,6 +26,7 @@ from FastAPI.match.match_manage_cancel import router as match_manage_cancel_rout
 from FastAPI.management.team_management import router as team_management_router # 팀 관리 조회
 from FastAPI.match.team_match_search import router as team_match_search_router # 팀 대 팀 매칭 조회
 from FastAPI.match.match_schedule import router as match_schedule_router # 매니저 구장 시간대별 일정 조회
+from FastAPI.match.match_result_insert import router as match_result_insert_router # 팀 매치 결과 등록·등급 점수 반영
 from FastAPI.report.report import router as report_router # 신고 내역 조회·심의 시작
 from FastAPI.approval.vacation import router as vacation_router
 from FastAPI.approval.groundapproval import router as ground_approval_router
@@ -87,6 +88,7 @@ app.include_router(match_manage_cancel_router) # 매니저 매칭 취소
 app.include_router(team_management_router, prefix="/management", tags=["Team Management"]) # 팀 관리 조회
 app.include_router(team_match_search_router, prefix="/match", tags=["Team Match Search"]) # 팀 대 팀 매칭 조회
 app.include_router(match_schedule_router, prefix="/match", tags=["Match Schedule"]) # 매니저 구장 시간대별 일정 조회
+app.include_router(match_result_insert_router, prefix="/match", tags=["Match Result Insert"]) # 팀 매치 결과 등록·등급 점수 반영
 app.include_router(report_router, prefix="/report", tags=["Report"]) # 신고 내역 조회·심의 시작
 app.include_router(appeal_router, prefix="/appeal", tags=["Appeal"]) # 제재·이의신청 조회·재심의 시작
 app.include_router(insert_banner_image_router) # 배너 이미지 등록 (/images/banner)

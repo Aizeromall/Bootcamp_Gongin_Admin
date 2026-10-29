@@ -19,9 +19,121 @@ from pydantic import BaseModel, ConfigDict, Field
 from database import connect
 from .manager_session import require_manager
 
+# 작업자 : 신현진
+# 수정일 : 2026-10-29
+# [수정 시작] 축구만 지원하던 기록을 4종목(축구·농구·배구·야구)으로 확장하고, 결과 등록 시 회원 등급 점수를 반영합니다.
+#   STAT_KEYS          : 종목별 스탯 키 (스탯코드 순서·마이너스 요인 포함, match_result_insert.py와 공용)
+#   SPORT_BY_SEQUENCE  : 종목 번호 → 종목코드 (c_prefer_stock 1 축구 / 2 농구 / 3 야구 / 4 배구)
+#   apply_member_ratings : 팀 승패 Elo + 개인 스탯 보너스로 c_rating 반영 (팀 매치 결과 등록과 같은 기준)
+from .match_result_insert import (
+    SPORT_BY_SEQUENCE,
+    SPORT_NAMES,
+    STAT_KEYS,
+    apply_member_ratings,
+    pack_statcode,
+    unpack_statcode,
+)
+# [수정 끝]
+
 router = APIRouter(prefix="/match/operations", tags=["Match Operations"])
 logger = logging.getLogger(__name__)
-STATS = ("goal", "assist", "shot", "yellow", "red")
+
+# 작업자 : 신현진
+# 수정일 : 2026-10-29
+# [수정 시작] 종목별 기록 버튼 (기존 STATS = 축구 5개 고정 → 종목코드별 버튼)
+#   kind     : 앱에서 보내는 버튼 값 (축구는 기존 goal/assist/shot/yellow/red 값을 그대로 유지)
+#   stats    : 이 버튼을 누르면 올라가는 스탯 키·개수
+#   own      : 버튼을 누른 선수 팀에 더해지는 점수
+#   opponent : 상대 팀에 더해지는 점수 (배구의 파울·범실은 상대 팀 득점)
+#   runners  : True면 기록할 때 홈인한 주자(같은 팀, 최대 3명)를 함께 받음 (야구 홈런)
+#   야구 홈런 : 버튼 1번 + 홈인한 주자 선택으로 한 번에 기록
+#          타자 : 홈런 1, 안타 1, 본인 득점 1, 타점 (주자 수 + 1) / 주자 : 각각 득점 1 / 팀 : +(주자 수 + 1)
+#          예) 1점 +1 / 2점 +2 / 3점 +3 / 만루 홈런(주자 3명) +4 → 타자 4타점, 주자 3명 각 1득점
+#          "마지막 기록 취소"는 홈런 1건(주자 득점·타점 포함)을 한 번에 되돌림
+#   안타·희생타 등으로 주자가 들어올 때는 주자에게 "득점(홈인)"(팀 +1), 타자에게 "타점"을 따로 눌러 줌
+SPORT_EVENTS = {
+    "SOCCER": [
+        dict(kind="goal", label="골", stats={"G": 1}, own=1, opponent=0),
+        dict(kind="assist", label="도움", stats={"A": 1}, own=0, opponent=0),
+        dict(kind="shot", label="슈팅", stats={"S": 1}, own=0, opponent=0),
+        dict(kind="foul", label="파울", stats={"F": 1}, own=0, opponent=0),
+        dict(kind="miss", label="찬스미스", stats={"M": 1}, own=0, opponent=0),
+        dict(kind="error", label="실책", stats={"E": 1}, own=0, opponent=0),
+        dict(kind="yellow", label="경고", stats={"Y": 1}, own=0, opponent=0),
+        dict(kind="red", label="퇴장", stats={"R": 1}, own=0, opponent=0),
+    ],
+    "BASKETBALL": [
+        dict(kind="free_throw", label="자유투 1점", stats={"P": 1}, own=1, opponent=0),
+        dict(kind="two_point", label="2점", stats={"P": 2}, own=2, opponent=0),
+        dict(kind="three_point", label="3점", stats={"P": 3, "T": 1}, own=3, opponent=0),
+        dict(kind="assist", label="어시스트", stats={"A": 1}, own=0, opponent=0),
+        dict(kind="rebound", label="리바운드", stats={"RB": 1}, own=0, opponent=0),
+        dict(kind="foul", label="파울", stats={"F": 1}, own=0, opponent=0),
+        dict(kind="turnover", label="턴오버", stats={"TO": 1}, own=0, opponent=0),
+    ],
+    "VOLLEYBALL": [
+        dict(kind="attack", label="공격 득점", stats={"P": 1}, own=1, opponent=0),
+        dict(kind="block", label="블로킹", stats={"B": 1}, own=1, opponent=0),
+        dict(kind="ace", label="서브에이스", stats={"SA": 1}, own=1, opponent=0),
+        dict(kind="foul", label="파울", stats={"F": 1}, own=0, opponent=1),
+        dict(kind="error", label="범실", stats={"E": 1}, own=0, opponent=1),
+    ],
+    "BASEBALL": [
+        dict(kind="hit", label="안타", stats={"H": 1}, own=0, opponent=0),
+        # 주자 1명마다 : 주자 RS +1, 타자 RBI +1, 팀 +1 (totals에서 계산)
+        dict(kind="homerun", label="홈런", stats={"HR": 1, "H": 1, "RS": 1, "RBI": 1}, own=1, opponent=0,
+             runners=True),
+        dict(kind="rbi", label="타점", stats={"RBI": 1}, own=0, opponent=0),
+        dict(kind="run", label="득점(홈인)", stats={"RS": 1}, own=1, opponent=0),
+        dict(kind="walk", label="볼넷", stats={"BB": 1}, own=0, opponent=0),
+        dict(kind="out", label="아웃", stats={"O": 1}, own=0, opponent=0),
+        dict(kind="strikeout", label="삼진", stats={"K": 1}, own=0, opponent=0),
+        dict(kind="error", label="실책", stats={"E": 1}, own=0, opponent=0),
+    ],
+}
+
+# 저장된 스탯으로 팀 점수를 다시 계산하는 규칙 (서버 재시작 후 결과 복원 시 팀 순서 확인용)
+#   (우리 팀 스탯 중 점수가 되는 키, 상대 팀 스탯 중 우리 점수가 되는 키)
+SCORE_RULES = {
+    "SOCCER": ({"G": 1}, {}),
+    "BASKETBALL": ({"P": 1}, {}),
+    "VOLLEYBALL": ({"P": 1, "B": 1, "SA": 1}, {"F": 1, "E": 1}),
+    "BASEBALL": ({"RS": 1}, {}),
+}
+
+
+# 경기 종목코드 (참가 회원의 c_prefer_stock이 모두 같아야 함, 섞여 있거나 모르면 None)
+def sport_code(state):
+    numbers = {str(p.get("c_prefer_stock")) for p in state["players"]}
+    if len(numbers) != 1:
+        return None
+    return SPORT_BY_SEQUENCE.get(numbers.pop())
+
+
+# 화면에 그릴 종목 정보 (버튼·스탯 이름), 종목을 모르면 축구 기준으로 표시
+def sport_info(state):
+    e_code = sport_code(state) or "SOCCER"
+    return dict(
+        e_code=e_code,
+        name=SPORT_NAMES[e_code],
+        known=sport_code(state) is not None,
+        # runners : True면 앱에서 홈인한 주자 선택 창을 띄움 (야구 홈런)
+        events=[dict(kind=e["kind"], label=e["label"], own=e["own"], opponent=e["opponent"],
+                     runners=e.get("runners", False))
+                for e in SPORT_EVENTS[e_code]],
+        stats=[dict(key=key, label=name) for key, name, _ in STAT_KEYS[e_code]],
+    )
+
+
+# 팀 스탯 합계로 팀 점수 계산 (SCORE_RULES 기준)
+def team_points(e_code, own_stats, opponent_stats):
+    own_rule, opponent_rule = SCORE_RULES[e_code]
+    return sum(own_stats.get(k, 0) * v for k, v in own_rule.items()) + sum(
+        opponent_stats.get(k, 0) * v for k, v in opponent_rule.items()
+    )
+
+
+# [수정 끝]
 ROSTER_SQL = """
  SELECT r.r_seq, r.c_id_seq, r.g_code, r.r_date,
         TIME_FORMAT(r.rs_time, '%%H:%%i:%%s') AS rs_time,
@@ -84,7 +196,11 @@ class Command(BaseModel):
     team_colors: list[str] = Field(
         default_factory=lambda: ["blue", "grey"], min_length=2, max_length=2
     )
-    kind: Literal["goal", "assist", "shot", "yellow", "red"] | None = None
+    # 작업자 : 신현진 / 수정일 : 2026-10-29
+    # 종목마다 버튼이 달라서 고정 목록 대신 글자로 받고, 기록할 때 SPORT_EVENTS로 확인합니다.
+    kind: str | None = Field(default=None, max_length=20)
+    # 야구 홈런 때 홈인한 주자 예약번호 (같은 팀, 최대 3명 = 만루 홈런)
+    runners: list[int] = Field(default_factory=list, max_length=3)
     body_parts: list[str] = Field(default_factory=list, max_length=8)
     severity: Literal["mild", "moderate", "severe"] | None = None
     measures: list[str] = Field(default_factory=list, max_length=7)
@@ -130,16 +246,36 @@ def pause_clock(state):
     state["running_since"] = None
 
 
+# 작업자 : 신현진
+# 수정일 : 2026-10-29
+# [수정 시작] 종목별 버튼 정의(SPORT_EVENTS)로 회원 스탯과 팀 점수를 계산합니다.
+#   스탯은 스탯코드 키(G, A, P, RBI ...) 기준으로 모읍니다.
 def totals(state):
     if "final_stats" in state:
         return deepcopy(state["final_stats"]), deepcopy(state["final_scores"])
-    result = {str(p["r_seq"]): dict.fromkeys(STATS, 0) for p in state["players"]}
+    e_code = sport_code(state) or "SOCCER"
+    keys = [key for key, _, _ in STAT_KEYS[e_code]]
+    events = {e["kind"]: e for e in SPORT_EVENTS[e_code]}
+    result = {str(p["r_seq"]): dict.fromkeys(keys, 0) for p in state["players"]}
     scores = {"A": 0, "B": 0}
     for event in state["events"]:
-        result[str(event["r_seq"])][event["kind"]] += 1
-        if event["kind"] == "goal":
+        definition = events.get(event["kind"])
+        if definition is None:
+            continue  # 종목에 없는 예전 기록은 계산하지 않음
+        for key, count in definition["stats"].items():
+            result[str(event["r_seq"])][key] += count
+        opponent = "B" if event["team"] == "A" else "A"
+        scores[event["team"]] += definition["own"]
+        scores[opponent] += definition["opponent"]
+        # 야구 홈런의 홈인 주자 : 주자 득점 +1, 타자 타점 +1, 팀 +1 (주자 1명마다)
+        for runner in event.get("runners", []):
+            result[str(runner)]["RS"] += 1
+            result[str(event["r_seq"])]["RBI"] += 1
             scores[event["team"]] += 1
     return result, scores
+
+
+# [수정 끝]
 
 
 def initial_state(rows):
@@ -207,6 +343,7 @@ def legacy_response(record, state):
         scores=None,
         elapsed_seconds=0,
         server_time=time.time(),
+        sport=sport_info(state),  # 작업자 : 신현진 / 수정일 : 2026-10-29 종목 정보
     )
 
 
@@ -227,6 +364,9 @@ def response_for(record, state):
         scores=scores,
         elapsed_seconds=elapsed(state),
         server_time=time.time(),
+        # 작업자 : 신현진 / 수정일 : 2026-10-29
+        # 종목 정보 (앱은 이 값으로 기록 버튼·스탯 이름을 그림)
+        sport=sport_info(state),
     )
 
 
@@ -322,28 +462,36 @@ def completed_state(rows, results):
     state["injuries"] = injuries_from_rows(results, state["players"])
     teams = list(dict.fromkeys(r["c_r_r_team"] for r in results))
     scores = {r["c_r_r_score"] for r in results}
-    pattern = r"G:(\d+),A:(\d+),S:(\d+),Y:(\d+),R:(\d+)"
-    parsed = {
-        r["c_id_seq"]: re.fullmatch(pattern, r["c_r_r_statcode"] or "") for r in results
-    }
+    # 작업자 : 신현진
+    # 수정일 : 2026-10-29
+    # [수정 시작] 4종목 스탯코드를 종목 키 기준으로 읽고, 종목별 점수 규칙(SCORE_RULES)으로 팀 순서를 확인합니다.
+    #   예전 축구 형식(G:1,A:0,S:0,Y:0,R:0)도 그대로 읽힘 (없는 키는 0)
+    e_codes = {r["e_code"] for r in results}
+    e_code = next(iter(e_codes)) if len(e_codes) == 1 else None
+    allowed = {key for key, _, _ in STAT_KEYS.get(e_code, [])}
+    parsed = {r["c_id_seq"]: unpack_statcode(r["c_r_r_statcode"]) for r in results}
     # 새 형식의 개인 기록·최종 점수는 서버 재시작 후에도 기존 결과 테이블에서 복원합니다.
     if (
         len(teams) == 2
         and all(teams)
         and len(scores) == 1
-        and all(parsed.values())
-        and all(r["e_code"] == "SOCCER" for r in results)
+        and e_code in STAT_KEYS
+        and all(stats and set(stats) <= allowed for stats in parsed.values())
         and re.fullmatch(r"\d+:\d+", str(next(iter(scores))))
     ):
         a, b = map(int, next(iter(scores)).split(":"))
-        team_goals = [
-            sum(
-                int(parsed[r["c_id_seq"]].group(1))
-                for r in results
-                if r["c_r_r_team"] == name
-            )
-            for name in teams
-        ]
+        keys = [key for key, _, _ in STAT_KEYS[e_code]]
+
+        def team_sum(name):
+            total = dict.fromkeys(keys, 0)
+            for r in results:
+                if r["c_r_r_team"] == name:
+                    for key, value in parsed[r["c_id_seq"]].items():
+                        total[key] += value
+            return total
+
+        sums = [team_sum(name) for name in teams]
+        team_goals = [team_points(e_code, sums[0], sums[1]), team_points(e_code, sums[1], sums[0])]
         if team_goals == [b, a] and a != b:
             teams.reverse()
         elif team_goals != [a, b]:
@@ -353,9 +501,10 @@ def completed_state(rows, results):
             duration_unknown=True,
             final_scores={"A": a, "B": b},
             final_stats={
-                str(p["r_seq"]): dict.fromkeys(STATS, 0) for p in state["players"]
+                str(p["r_seq"]): dict.fromkeys(keys, 0) for p in state["players"]
             },
         )
+        # [수정 끝]
         for player in state["players"]:
             result = next(
                 (r for r in results if r["c_id_seq"] == player["c_id_seq"]), None
@@ -365,9 +514,8 @@ def completed_state(rows, results):
             key = str(player["r_seq"])
             state["attendance"][key] = bool(result["c_r_r_attendance"])
             state["assignments"][key] = "A" if result["c_r_r_team"] == teams[0] else "B"
-            state["final_stats"][key] = dict(
-                zip(STATS, map(int, parsed[player["c_id_seq"]].groups()))
-            )
+            # 작업자 : 신현진 / 수정일 : 2026-10-29 종목 키 기준으로 복원
+            state["final_stats"][key].update(parsed[player["c_id_seq"]])
         return state, False
     return state, True
 
@@ -501,8 +649,10 @@ def mutate(cursor, record, state, command):
     elif action == "teams":
         if status not in ("attendance", "teams"):
             raise HTTPException(409, "팀 설정은 경기 시작 전에 진행해 주세요.")
-        if any(str(p["c_prefer_stock"]) != "1" for p in state["players"]):
-            raise HTTPException(409, "이번 경기 기록 화면은 축구 종목만 지원합니다.")
+        # 작업자 : 신현진 / 수정일 : 2026-10-29
+        # 축구만 허용하던 확인을 4종목으로 변경 (참가 회원의 종목이 모두 같아야 함)
+        if sport_code(state) is None:
+            raise HTTPException(409, "참가 회원의 종목을 확인할 수 없거나 종목이 섞여 있습니다.")
         if any(str(p["r_seq"]) not in state["attendance"] for p in state["players"]):
             raise HTTPException(409, "모든 예약자의 출석 또는 결석을 확인해 주세요.")
         state.update(
@@ -557,16 +707,37 @@ def mutate(cursor, record, state, command):
             or command.kind is None
         ):
             raise HTTPException(409, "진행 중인 경기의 선수를 먼저 선택해 주세요.")
+        # 작업자 : 신현진
+        # 수정일 : 2026-10-29
+        # [수정 시작] 이 경기 종목의 버튼인지 확인하고, 축구 퇴장(R)만 추가 기록을 막습니다.
+        e_code = sport_code(state)
+        definition = next((e for e in SPORT_EVENTS.get(e_code, []) if e["kind"] == command.kind), None)
+        if definition is None:
+            raise HTTPException(422, "이 종목에 없는 기록입니다.")
         stats, _ = totals(state)
-        if stats[str(player["r_seq"])]["red"]:
+        if e_code == "SOCCER" and stats[str(player["r_seq"])]["R"]:
             raise HTTPException(409, "퇴장한 선수는 추가 기록을 입력할 수 없습니다.")
+        # 홈인 주자 확인 (야구 홈런만, 같은 팀 출전 선수, 타자 본인·중복 제외, 최대 3명)
+        team = state["assignments"][str(player["r_seq"])]
+        runners = command.runners
+        if runners and not definition.get("runners"):
+            raise HTTPException(422, "홈인 주자는 홈런 기록에서만 선택할 수 있습니다.")
+        if len(set(runners)) != len(runners) or player["r_seq"] in runners:
+            raise HTTPException(422, "홈인 주자를 다시 선택해 주세요. (타자 본인·중복 선택 불가)")
+        if any(state["assignments"].get(str(r)) != team for r in runners):
+            raise HTTPException(422, "홈인 주자는 같은 팀 출전 선수만 선택할 수 있습니다.")
+        names = {p["r_seq"]: p["c_name"] for p in state["players"]}
+        # [수정 끝]
         state["events"].append(
             dict(
                 r_seq=player["r_seq"],
                 name=player["c_name"],
                 kind=command.kind,
-                team=state["assignments"][str(player["r_seq"])],
+                team=team,
                 elapsed_seconds=elapsed(state),
+                # 작업자 : 신현진 / 수정일 : 2026-10-29 홈런 홈인 주자 (기록 목록 표시용 이름 포함)
+                runners=runners,
+                runner_names=[names[r] for r in runners],
             )
         )
     elif action == "undo":
@@ -655,16 +826,20 @@ def mutate(cursor, record, state, command):
         )
         cursor.fetchall()
         # 팀 이름 중복은 완료 결과의 팀 복원을 불가능하게 하므로 시작 전에 막습니다.
+        # 작업자 : 신현진
+        # 수정일 : 2026-10-29
+        # [수정 시작] 경기 종목의 스탯코드·종목코드로 저장하고, 같은 트랜잭션에서 회원 등급 점수(c_rating)를 반영합니다.
+        e_code = sport_code(state)
+        if e_code is None:
+            raise HTTPException(409, "참가 회원의 종목을 확인할 수 없거나 종목이 섞여 있습니다.")
+        rating_teams = {"A": [], "B": []}  # 등급 점수 계산용 팀별 출석 회원
         for p in state["players"]:
             present = state["attendance"].get(str(p["r_seq"]), False)
             write_attendance(cursor, record, p, present)
             if not present:
                 continue
             s = stats[str(p["r_seq"])]
-            packed = ",".join(
-                f"{key}:{s[value]}"
-                for key, value in zip(("G", "A", "S", "Y", "R"), STATS)
-            )
+            packed = pack_statcode(e_code, s)
             if len(packed) > 50:
                 raise HTTPException(422, "기록 수가 저장 가능한 범위를 초과했습니다.")
             team = state["assignments"][str(p["r_seq"])]
@@ -672,13 +847,20 @@ def mutate(cursor, record, state, command):
                 "UPDATE c_result_record SET c_r_r_team=%s,e_code=%s,c_r_r_statcode=%s,c_r_r_score=%s WHERE c_r_r_code=%s AND c_id_seq=%s",
                 (
                     state["team_names"][0 if team == "A" else 1],
-                    "SOCCER",
+                    e_code,
                     packed,
                     f"{scores['A']}:{scores['B']}",
                     record["match_code"],
                     p["c_id_seq"],
                 ),
             )
+            rating_teams[team].append(dict(c_id_seq=p["c_id_seq"], stats=s))
+        # 결과 저장과 같은 트랜잭션이라 저장이 실패하면 점수 반영도 함께 되돌아감
+        # 결과 등록은 한 번만 가능해서(completed 이후 재등록 불가) 점수도 한 번만 반영됨
+        state["rating_changes"] = apply_member_ratings(
+            cursor, e_code, rating_teams["A"], rating_teams["B"], scores["A"], scores["B"]
+        )
+        # [수정 끝]
         record["status"] = "completed"
 
 
