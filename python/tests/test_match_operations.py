@@ -254,6 +254,8 @@ class MatchRulesTest(unittest.TestCase):
         self.assertEqual(args[1], "BASKETBALL")
         self.assertEqual([p["c_id_seq"] for p in args[2]], ["test1_01"])
         self.assertEqual(args[4:], (3, 0))
+        # 회원 결과 기록에 반영 전 / 후 점수를 저장하도록 경기코드를 같이 넘김
+        self.assertEqual(ratings.call_args.kwargs["match_code"], self.record["match_code"])
 
     # [추가 끝]
 

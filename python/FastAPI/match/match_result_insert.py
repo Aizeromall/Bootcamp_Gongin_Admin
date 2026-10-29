@@ -22,9 +22,16 @@
 #   기대 승률 We = 1 / (10^(-(우리 팀 점수 - 상대 팀 점수) / 600) + 1)
 #   새 팀 점수   = 이전 팀 점수 + 40 × (결과 - We)
 #
-# [두 번 반영 방지] 점수 변동 컬럼 없이 c_rating / t_rating을 바로 업데이트
+# [두 번 반영 방지] c_rating / t_rating을 바로 업데이트
 #   결과 저장과 점수 반영을 한 트랜잭션으로 처리하고, 같은 경기의 결과가 이미 있으면 등록을 막음
 #   → 결과 확정 후에는 수정하지 않음 (경기 진행 API와 같은 규칙)
+#
+# 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
+# [경기별 점수 기록] 지난 경기의 점수 변동·내 수준 통계(점수 추이)를 볼 수 있게 결과 기록에 함께 저장
+#   c_result_record.c_r_r_rating_before / c_r_r_rating_after : 회원의 그 경기 반영 전 / 후 점수 (변동 = 후 - 전)
+#   t_result_record.t_r_r_rating_after                       : 팀의 그 경기 반영 후 점수
+#     팀 기록은 결과 등록 순서대로 쌓이므로 직전 기록의 후 점수 = 이번 경기 전 점수 (직전 기록이 없으면 시작 점수)
+#   컬럼 추가 전 기록은 NULL (변동 기록 없음)
 #
 # [팀 매치 경기코드] t_result_record.t_r_r_m_code / c_result_record.c_r_r_code = team_match.team_code (숫자 글자)
 #   실력매칭 경기코드는 항상 "구장_날짜_시간" 형식(밑줄 포함)이라 겹치지 않음 (team_match_search.py와 같은 기준)
@@ -197,8 +204,11 @@ def team_new_rating(rating: int, opponent_rating: int, result: float) -> int:
 # 경기 진행 API(match_operations.py)에서는 결과 등록(publish) 저장이 끝난 뒤 아래처럼 호출
 #   apply_member_ratings(cursor, "SOCCER",
 #       [{"c_id_seq": 회원ID, "stats": unpack_statcode(저장한 스탯코드)} for A팀 출석 회원], ...B팀...,
-#       scores["A"], scores["B"])
-def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_a: int, score_b: int) -> list:
+#       scores["A"], scores["B"], match_code=경기코드)
+#   match_code : 경기코드를 주면 그 경기의 회원 결과 기록(c_result_record)에 반영 전 / 후 점수도 저장
+#                (기록 줄이 먼저 저장돼 있어야 함, 2026.10.29 신현진)
+def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_a: int, score_b: int,
+                         match_code: Optional[str] = None) -> list:
     if e_code not in STAT_KEYS:
         raise HTTPException(status_code=422, detail="지원하지 않는 종목코드입니다.")
     players = team_a + team_b
@@ -236,6 +246,15 @@ def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_
                 "UPDATE customer SET c_rating = %s WHERE c_id_seq = %s",
                 (after, player["c_id_seq"]),
             )
+            if match_code is not None:
+                # 그 경기의 회원 기록에 반영 전 / 후 점수 저장 (2026.10.29 신현진)
+                cursor.execute(
+                    """
+                    UPDATE c_result_record SET c_r_r_rating_before = %s, c_r_r_rating_after = %s
+                    WHERE c_r_r_code = %s AND c_id_seq = %s
+                    """,
+                    (before, after, match_code, player["c_id_seq"]),
+                )
             changes.append({
                 "c_id_seq": player["c_id_seq"],          # 회원ID
                 "team": side,                            # A / B (팀 매치는 A = 홈, B = 원정)
@@ -290,7 +309,7 @@ def validate_players(e_code: str, home: list, away: list):
 
 
 # 팀 매치 결과 등록 (담당 매니저)
-# 처리 순서 : 매니저·매칭 확인 → 참가 회원 확인 → 회원·팀 점수 반영 → 결과 저장 (한 트랜잭션)
+# 처리 순서 : 매니저·매칭 확인 → 참가 회원 확인 → 팀 점수 반영 → 결과 저장 → 회원 점수 반영 (한 트랜잭션)
 # 예: POST /match/team_result/manager01/3
 #     body {"home_score": 52, "away_score": 47,
 #           "home_players": [{"c_id_seq": "hong_02", "stats": {"P": 18, "T": 2}}], "away_players": [...]}
@@ -360,16 +379,14 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
                 if not_member:
                     raise HTTPException(status_code=422, detail=f"{side} 팀 회원이 아닙니다: {', '.join(not_member)}")
 
-            # 7) 회원 점수 반영 (A = 홈, B = 원정)
+            # 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
+            # 회원 기록에 반영 전 / 후 점수를 함께 저장하려고 순서 변경 : 팀 점수 → 결과 저장 → 회원 점수
             def to_dicts(players: list) -> list:
                 return [{"c_id_seq": p.c_id_seq.strip(), "stats": p.stats} for p in players]
 
             home_list, away_list = to_dicts(body.home_players), to_dicts(body.away_players)
-            member_changes = apply_member_ratings(
-                cursor, e_code, home_list, away_list, body.home_score, body.away_score,
-            )
 
-            # 8) 팀 점수 반영 (FIFA 방식, FOR UPDATE로 두 팀 점수 잠금)
+            # 7) 팀 점수 반영 (FIFA 방식, FOR UPDATE로 두 팀 점수 잠금)
             cursor.execute(
                 "SELECT t_id, t_rating FROM team WHERE t_id IN (%s, %s) FOR UPDATE",
                 (match["home_t_id"], match["away_t_id"]),
@@ -382,14 +399,14 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
             for t_id, rating in ((match["home_t_id"], home_after), (match["away_t_id"], away_after)):
                 cursor.execute("UPDATE team SET t_rating = %s WHERE t_id = %s", (rating, t_id))
 
-            # 9) 결과 저장
+            # 8) 결과 저장
             g_code = match["rental_g_code"]
             sides = (
-                # (팀ID, 팀 이름, 회원 목록, 우리 점수, 상대 점수)
-                (match["home_t_id"], match["home_t_name"], home_list, body.home_score, body.away_score),
-                (match["away_t_id"], match["away_t_name"], away_list, body.away_score, body.home_score),
+                # (팀ID, 팀 이름, 회원 목록, 우리 점수, 상대 점수, 경기 후 팀 점수)
+                (match["home_t_id"], match["home_t_name"], home_list, body.home_score, body.away_score, home_after),
+                (match["away_t_id"], match["away_t_name"], away_list, body.away_score, body.home_score, away_after),
             )
-            for t_id, t_name, players, my_score, opponent_score in sides:
+            for t_id, t_name, players, my_score, opponent_score, team_after in sides:
                 score = f"{my_score}:{opponent_score}"  # 각 팀 기준 스코어 (우리팀:상대팀)
                 # 팀 스탯코드 = 참가 회원 스탯 합계
                 team_stats = {}
@@ -399,10 +416,11 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
                 cursor.execute(
                     """
                     INSERT INTO t_result_record
-                        (m_id, g_code, t_id, t_r_r_m_code, t_r_r_date, e_code, t_r_r_statcode, t_r_r_score)
-                    VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s)
+                        (m_id, g_code, t_id, t_r_r_m_code, t_r_r_date, e_code, t_r_r_statcode, t_r_r_score,
+                         t_r_r_rating_after)
+                    VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s)
                     """,
-                    (m_id, g_code, t_id, match_code, e_code, pack_statcode(e_code, team_stats), score),
+                    (m_id, g_code, t_id, match_code, e_code, pack_statcode(e_code, team_stats), score, team_after),
                 )
                 # 회원별 결과 (출석 1, 부상 기록은 빈 값, 스코어는 회원이 속한 팀 기준)
                 for player in players:
@@ -418,6 +436,12 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
                         """,
                         (m_id, g_code, player["c_id_seq"], t_name, match_code, score, e_code, statcode),
                     )
+
+            # 9) 회원 점수 반영 (A = 홈, B = 원정) + 위에서 저장한 회원 기록에 반영 전 / 후 점수 저장
+            member_changes = apply_member_ratings(
+                cursor, e_code, home_list, away_list, body.home_score, body.away_score,
+                match_code=match_code,
+            )
         connection.commit()  # 결과 저장 + 회원·팀 점수 반영을 한 번에 확정
         return {
             "result": "OK",

@@ -857,8 +857,10 @@ def mutate(cursor, record, state, command):
             rating_teams[team].append(dict(c_id_seq=p["c_id_seq"], stats=s))
         # 결과 저장과 같은 트랜잭션이라 저장이 실패하면 점수 반영도 함께 되돌아감
         # 결과 등록은 한 번만 가능해서(completed 이후 재등록 불가) 점수도 한 번만 반영됨
+        # match_code : 회원 결과 기록에 반영 전 / 후 점수(c_r_r_rating_before / after)도 저장 (2026-10-29 신현진)
         state["rating_changes"] = apply_member_ratings(
-            cursor, e_code, rating_teams["A"], rating_teams["B"], scores["A"], scores["B"]
+            cursor, e_code, rating_teams["A"], rating_teams["B"], scores["A"], scores["B"],
+            match_code=record["match_code"],
         )
         # [수정 끝]
         record["status"] = "completed"
