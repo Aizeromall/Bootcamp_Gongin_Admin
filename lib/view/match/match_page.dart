@@ -221,14 +221,115 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
 
   List<Map<String, dynamic>> teamPlayers(String team) =>
       players.where((p) => assignments['${p['r_seq']}'] == team).toList();
+  // 작업자 : 신현진
+  // 수정일 : 2026-10-29
+  // [수정 시작] 4종목 지원 : 서버가 보내는 종목 정보(sport)로 기록 버튼·스탯 이름을 그립니다.
+  // 종목 정보가 없는 응답(이전 서버)은 기존 축구 버튼(statLabels)으로 표시합니다.
+  List<Map<String, dynamic>> get sportEvents {
+    final events = data?['sport']?['events'] as List?;
+    if (events == null) {
+      return [
+        for (final e in statLabels.entries)
+          {'kind': e.key, 'label': e.value, 'own': e.key == 'goal' ? 1 : 0},
+      ];
+    }
+    return events.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  List<Map<String, dynamic>> get sportStats {
+    final stats = data?['sport']?['stats'] as List?;
+    if (stats == null) {
+      return [
+        for (final e in statLabels.entries) {'key': e.key, 'label': e.value},
+      ];
+    }
+    return stats.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  // 점수가 나는 버튼 아이콘 (종목별)
+  IconData get scoreIcon => switch (data?['sport']?['e_code']) {
+    'BASKETBALL' => Icons.sports_basketball,
+    'VOLLEYBALL' => Icons.sports_volleyball,
+    'BASEBALL' => Icons.sports_baseball,
+    _ => Icons.sports_soccer,
+  };
+
+  String eventLabel(String? kind) =>
+      sportEvents.firstWhere(
+        (e) => e['kind'] == kind,
+        orElse: () => {'label': kind ?? ''},
+      )['label'] as String;
+
+  // 기록 목록 표시 (야구 홈런은 "홈런 2점 · 홈인 선수3" 처럼 점수·홈인 주자를 함께 표시)
+  String eventText(Map event) {
+    final label = eventLabel(event['kind'] as String?);
+    final names = (event['runner_names'] as List?) ?? const [];
+    final isRunnerEvent = sportEvents.any(
+      (e) => e['kind'] == event['kind'] && e['runners'] == true,
+    );
+    if (!isRunnerEvent) return label;
+    final points = names.length + 1;
+    return names.isEmpty
+        ? '$label $points점'
+        : '$label $points점 · 홈인 ${names.join(', ')}';
+  }
+
+  // 야구 홈런 : 같은 팀 출전 선수 중 홈인한 주자를 최대 3명 선택 (취소하면 null)
+  Future<List<int>?> pickRunners() {
+    final team = '${assignments['$selected']}';
+    final candidates = teamPlayers(team)
+        .where((p) => p['r_seq'] != selected)
+        .toList();
+    final chosen = <int>{};
+    return showDialog<List<int>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: Text('홈인한 주자 선택 · ${chosen.length + 1}점 홈런'),
+          content: SizedBox(
+            width: 360,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                const Text('주자 없이 솔로 홈런이면 선택하지 않고 기록하세요. (최대 3명 = 만루 홈런)'),
+                for (final p in candidates)
+                  CheckboxListTile(
+                    value: chosen.contains(p['r_seq']),
+                    title: Text('${p['c_name']}'),
+                    // 3명을 고르면 나머지는 선택할 수 없음
+                    onChanged: !chosen.contains(p['r_seq']) && chosen.length >= 3
+                        ? null
+                        : (checked) => setDialog(() => checked == true
+                              ? chosen.add(p['r_seq'] as int)
+                              : chosen.remove(p['r_seq'])),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, chosen.toList()),
+              child: Text('${chosen.length + 1}점 홈런 기록'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   String statsText(Map<String, dynamic> p) {
     final stats = Map<String, dynamic>.from(data!['stats']['${p['r_seq']}']);
-    final values = statLabels.entries
-        .where((e) => (stats[e.key] as num) > 0)
-        .map((e) => '${e.value} ${stats[e.key]}')
+    final values = sportStats
+        .where((e) => ((stats[e['key']] ?? 0) as num) > 0)
+        .map((e) => '${e['label']} ${stats[e['key']]}')
         .join(' · ');
     return values.isEmpty ? '기록 없음' : values;
   }
+  // [수정 끝]
 
   Widget section(String title, Widget child) => Card(
     margin: const EdgeInsets.only(bottom: 20),
@@ -655,18 +756,33 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              for (final e in statLabels.entries)
+              // 작업자 : 신현진 / 수정일 : 2026-10-29 종목별 기록 버튼
+              for (final e in sportEvents)
                 SizedBox(
                   width: 130,
                   child: actionButton(
-                    e.value,
+                    '${e['label']}',
                     selected == null
                         ? null
-                        : () => command('event', {
-                            'r_seq': selected,
-                            'kind': e.key,
-                          }),
-                    icon: e.key == 'goal' ? Icons.sports_soccer : Icons.add,
+                        : () async {
+                            // 야구 홈런은 홈인한 주자를 고른 뒤 한 번에 기록
+                            if (e['runners'] == true) {
+                              final runners = await pickRunners();
+                              if (runners == null || !mounted) return;
+                              await command('event', {
+                                'r_seq': selected,
+                                'kind': e['kind'],
+                                'runners': runners,
+                              });
+                              return;
+                            }
+                            await command('event', {
+                              'r_seq': selected,
+                              'kind': e['kind'],
+                            });
+                          },
+                    // 우리 팀 점수가 나는 버튼은 종목 아이콘
+                    icon: ((e['own'] ?? 0) as num) > 0 ? scoreIcon : Icons.add,
                   ),
                 ),
             ],
@@ -705,7 +821,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Text(
-                '${clockText((event['elapsed_seconds'] as num).toInt())} · ${event['name']} · ${statLabels[event['kind']]}',
+                '${clockText((event['elapsed_seconds'] as num).toInt())} · ${event['name']} · ${eventText(event as Map)}',
               ),
             ),
         ],
@@ -819,19 +935,20 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
+                    // 작업자 : 신현진 / 수정일 : 2026-10-29 종목별 스탯 열
                     columns: [
                       const DataColumn(label: Text('회원')),
-                      for (final name in statLabels.values)
-                        DataColumn(label: Text(name), numeric: true),
+                      for (final stat in sportStats)
+                        DataColumn(label: Text('${stat['label']}'), numeric: true),
                     ],
                     rows: [
                       for (final p in teamPlayers(team))
                         DataRow(
                           cells: [
                             DataCell(Text('${p['c_name']}')),
-                            for (final key in statLabels.keys)
+                            for (final stat in sportStats)
                               DataCell(
-                                Text('${data!['stats']['${p['r_seq']}'][key]}'),
+                                Text('${data!['stats']['${p['r_seq']}'][stat['key']] ?? 0}'),
                               ),
                           ],
                         ),
@@ -839,6 +956,29 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                   ),
                 ),
               ),
+            // 작업자 : 신현진
+            // 수정일 : 2026-10-29
+            // [추가 시작] 결과 등록 후 회원별 등급 점수 변동 (팀 승패 + 개인 스탯 보너스)
+            if ((state['rating_changes'] as List?)?.isNotEmpty ?? false)
+              section(
+                '등급 점수 변동',
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final change in state['rating_changes'] as List)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          '${players.where((p) => p['c_id_seq'] == change['c_id_seq']).firstOrNull?['c_name'] ?? change['c_id_seq']}'
+                          ' · ${change['result']} · ${change['rating_before']} → ${change['rating_after']}'
+                          ' (${(change['rating_change'] as num) >= 0 ? '+' : ''}${change['rating_change']})'
+                          ' · ${change['tier_before']} → ${change['tier_after']}',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            // [추가 끝]
             injuryRecords(),
             if (status == 'review')
               section(

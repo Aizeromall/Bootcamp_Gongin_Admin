@@ -71,7 +71,8 @@ class MatchRulesTest(unittest.TestCase):
         self.live()
         self.call("event", r_seq=1, kind="goal")
         stats, score = totals(self.state)
-        self.assertEqual(stats["1"]["goal"], 1)
+        # 작업자 : 신현진 / 수정일 : 2026-10-29 스탯은 스탯코드 키(G = 골) 기준
+        self.assertEqual(stats["1"]["G"], 1)
         self.assertEqual(score, {"A": 1, "B": 0})
         self.call("undo")
         self.assertEqual(totals(self.state)[1], {"A": 0, "B": 0})
@@ -93,7 +94,9 @@ class MatchRulesTest(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.call("start")
 
-    def test_only_soccer_can_start(self):
+    # 작업자 : 신현진 / 수정일 : 2026-10-29
+    # 4종목을 지원하므로 "축구만 시작 가능" 대신 "종목이 섞인 경기는 시작 불가"를 확인
+    def test_mixed_sports_cannot_start(self):
         self.state["players"][0]["c_prefer_stock"] = "3"
         with self.assertRaises(HTTPException):
             self.call("teams")
@@ -123,7 +126,10 @@ class MatchRulesTest(unittest.TestCase):
         self.assertIsNone(self.state["running_since"])
         self.assertEqual(totals(self.state)[1], {"A": 0, "B": 0})
 
-    def test_final_publish_is_idempotent_and_locks_result(self):
+    # 작업자 : 신현진 / 수정일 : 2026-10-29
+    # 결과 등록 시 등급 점수 반영 함수가 DB 회원 점수를 읽으므로 가짜 함수로 바꿔서 확인
+    @patch.object(operations, "apply_member_ratings", return_value=[])
+    def test_final_publish_is_idempotent_and_locks_result(self, _ratings):
         self.live()
         self.call("event", r_seq=1, kind="goal")
         self.call("end")
@@ -148,6 +154,108 @@ class MatchRulesTest(unittest.TestCase):
         self.call("edit")
         self.assertEqual(self.record["status"], "live")
         self.assertIsNone(self.state["running_since"])
+
+    # 작업자 : 신현진
+    # 수정일 : 2026-10-29
+    # [추가 시작] 종목별 기록 버튼·팀 점수 규칙과 결과 등록 시 등급 점수 반영을 확인합니다.
+    def use_sport(self, number):
+        for p in self.state["players"]:
+            p["c_prefer_stock"] = number
+
+    def test_basketball_points_and_three_pointer(self):
+        self.use_sport("2")
+        self.live()
+        self.call("event", r_seq=1, kind="three_point")
+        self.call("event", r_seq=1, kind="two_point")
+        self.call("event", r_seq=2, kind="free_throw")
+        stats, score = totals(self.state)
+        self.assertEqual((stats["1"]["P"], stats["1"]["T"]), (5, 1))
+        self.assertEqual(score, {"A": 5, "B": 1})
+
+    def test_volleyball_error_gives_opponent_point(self):
+        self.use_sport("4")
+        self.live()
+        self.call("event", r_seq=1, kind="ace")
+        self.call("event", r_seq=1, kind="error")
+        stats, score = totals(self.state)
+        self.assertEqual((stats["1"]["SA"], stats["1"]["E"]), (1, 1))
+        self.assertEqual(score, {"A": 1, "B": 1})
+
+    def baseball_live(self, extra_a=()):
+        # 야구 : A팀 타자 1 + 주자 3·4 (+ extra_a), B팀 2·5·6 (팀 인원 차이 1명 이하)
+        for i in (3, 4, 5, 6, *extra_a):
+            self.players.append(dict(r_seq=i, c_id_seq=f"test{i}_03", c_name=f"선수{i}",
+                                     c_position="주자", c_rating=1500, c_prefer_stock="3"))
+        self.state = initial_state(self.players)
+        self.use_sport("3")
+        for p in self.players:
+            self.call("attendance", r_seq=p["r_seq"], attendance=True)
+        assignments = {"1": "A", "3": "A", "4": "A", "5": "B", "2": "B", "6": "B"}
+        assignments.update({str(i): "A" for i in extra_a})
+        self.call("teams", assignments=assignments)
+        self.call("start")
+
+    def test_baseball_homerun_scores_by_runners(self):
+        # 1점 / 2점 / 3점 홈런 : 홈런 버튼 1번 + 홈인 주자 선택
+        self.baseball_live()
+        for runners, expected in (([], 1), ([3], 2), ([3, 4], 3)):
+            before = totals(self.state)[1]["A"]
+            self.call("event", r_seq=1, kind="homerun", runners=runners)
+            self.assertEqual(totals(self.state)[1]["A"] - before, expected)
+        stats, score = totals(self.state)
+        # 타자 : 홈런 3, 안타 3, 본인 득점 3, 타점 1 + 2 + 3 = 6
+        self.assertEqual((stats["1"]["HR"], stats["1"]["H"], stats["1"]["RS"], stats["1"]["RBI"]), (3, 3, 3, 6))
+        # 주자 3 : 득점 2 (2점·3점 홈런) / 주자 4 : 득점 1 (3점 홈런), 주자는 타점 없음
+        self.assertEqual((stats["3"]["RS"], stats["3"]["RBI"], stats["4"]["RS"]), (2, 0, 1))
+        self.assertEqual(score, {"A": 6, "B": 0})
+
+    def test_baseball_grand_slam_and_undo(self):
+        # 만루 홈런 : 주자 3명 → 팀 +4, 타자 4타점 / 마지막 기록 취소는 홈런 전체를 되돌림
+        self.baseball_live(extra_a=(7,))
+        self.call("event", r_seq=1, kind="homerun", runners=[3, 4, 7])
+        stats, score = totals(self.state)
+        self.assertEqual((score["A"], stats["1"]["RBI"]), (4, 4))
+        self.assertEqual([stats[str(r)]["RS"] for r in (3, 4, 7)], [1, 1, 1])
+        self.call("undo")
+        stats, score = totals(self.state)
+        self.assertEqual((score["A"], stats["1"]["RBI"], stats["3"]["RS"]), (0, 0, 0))
+
+    def test_baseball_runners_are_validated(self):
+        self.baseball_live()
+        for kind, runners in (
+            ("homerun", [5]),        # 상대 팀 선수
+            ("homerun", [1]),        # 타자 본인
+            ("homerun", [3, 3]),     # 같은 주자 중복
+            ("hit", [3]),            # 홈런이 아닌 기록
+        ):
+            with self.assertRaises(HTTPException):
+                self.call("event", r_seq=1, kind=kind, runners=runners)
+        with self.assertRaises(Exception):
+            Command(version=0, action="event", r_seq=1, kind="homerun", runners=[3, 4, 5, 6])  # 4명 초과
+        self.assertEqual(totals(self.state)[1], {"A": 0, "B": 0})
+
+    def test_event_of_other_sport_is_rejected(self):
+        self.use_sport("2")
+        self.live()
+        with self.assertRaises(HTTPException):
+            self.call("event", r_seq=1, kind="goal")
+
+    @patch.object(operations, "apply_member_ratings", return_value=[])
+    def test_publish_saves_sport_statcode_and_applies_ratings(self, ratings):
+        self.use_sport("2")
+        self.live()
+        self.call("event", r_seq=1, kind="three_point")
+        self.call("end")
+        self.call("publish")
+        updates = [c.args[1] for c in self.cursor.execute.call_args_list
+                   if c.args[0].startswith("UPDATE c_result_record SET c_r_r_team")]
+        self.assertEqual(updates[0][1:4], ("BASKETBALL", "P:3,T:1,A:0,RB:0,F:0,TO:0", "3:0"))
+        args = ratings.call_args.args
+        self.assertEqual(args[1], "BASKETBALL")
+        self.assertEqual([p["c_id_seq"] for p in args[2]], ["test1_01"])
+        self.assertEqual(args[4:], (3, 0))
+
+    # [추가 끝]
 
 
 # 작업자 : 양태건

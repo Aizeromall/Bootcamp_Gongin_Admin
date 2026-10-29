@@ -170,7 +170,8 @@ def run():
                 "A": 1,
                 "B": 0,
             }
-            assert recovered["stats"][str(ids[0])]["goal"] == 1
+            # 작업자 : 신현진 / 수정일 : 2026-10-29 스탯은 스탯코드 키(G = 골) 기준
+            assert recovered["stats"][str(ids[0])]["G"] == 1
             assert len(recovered["state"]["injuries"]) == 2
             listed = client.get("/match/operations", headers=headers).json()["results"]
             assert any(
@@ -184,9 +185,10 @@ def run():
                 )
                 saved = cursor.fetchall()
                 assert len(saved) == 2 and all(p["c_r_r_score"] == "1:0" for p in saved)
+                # 작업자 : 신현진 / 수정일 : 2026-10-29 축구 스탯코드에 파울(F)·찬스미스(M)·실책(E) 추가
                 assert {p["c_r_r_statcode"] for p in saved} == {
-                    "G:1,A:0,S:0,Y:0,R:0",
-                    "G:0,A:1,S:0,Y:0,R:0",
+                    "G:1,A:0,S:0,F:0,M:0,E:0,Y:0,R:0",
+                    "G:0,A:1,S:0,F:0,M:0,E:0,Y:0,R:0",
                 }
         print(
             "HTTP·실제 DB 검증 통과: 인증, 출석, 팀, 골·도움·취소, 부상, 결과 일괄 저장, 중복 등록 방지, 지난 매치"
