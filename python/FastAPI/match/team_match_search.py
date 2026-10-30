@@ -146,6 +146,8 @@ TEAM_MATCH_SELECT = f"""
         rm.m_id AS rental_m_id, rm.m_name AS rental_m_name
     FROM (
         SELECT tm.team_code, tm.team_num, tm.team_start, tm.team_end,
+            (SELECT tc.c_category FROM team_create tc WHERE tc.t_id=tm.home_t_id LIMIT 1) AS home_category,
+            (SELECT tc.c_category FROM team_create tc WHERE tc.t_id=tm.away_t_id LIMIT 1) AS away_category,
             tm.home_t_id, ht.t_name AS home_t_name, ht.t_logo AS home_t_logo,
             tm.away_t_id, awt.t_name AS away_t_name, awt.t_logo AS away_t_logo,
             {CAPTAIN_ID_SQL.format(t_id="tm.home_t_id")} AS home_captain_id,
@@ -180,13 +182,16 @@ def load_match_results(cursor, team_codes: list) -> dict:
     cursor.execute(
         f"""
         SELECT rr.t_r_r_m_code, rr.t_id, rr.t_r_r_score, rr.t_r_r_date,
-            rr.m_id, mm.m_name, rr.g_code, g.g_name, rr.t_r_r_rating_after,
+            rr.m_id, mm.m_name, rr.g_code, g.g_name, rr.t_r_r_rating_after, t.t_rating AS current_team_rating,
+            (SELECT COUNT(DISTINCT all_rr.t_r_r_m_code) FROM t_result_record all_rr
+             WHERE all_rr.t_id=rr.t_id AND all_rr.t_r_r_score IS NOT NULL) AS completed_match_count,
             (SELECT COUNT(*) FROM t_result_record AS pv
              WHERE pv.t_id = rr.t_id AND pv.t_r_r_seq < rr.t_r_r_seq) AS prev_count,
             (SELECT pv.t_r_r_rating_after FROM t_result_record AS pv
              WHERE pv.t_id = rr.t_id AND pv.t_r_r_seq < rr.t_r_r_seq
              ORDER BY pv.t_r_r_seq DESC LIMIT 1) AS prev_rating_after
         FROM t_result_record AS rr
+        LEFT JOIN team AS t ON t.t_id=rr.t_id
         LEFT JOIN match_manager AS mm ON mm.m_id = rr.m_id
         LEFT JOIN ground AS g ON g.g_code = rr.g_code
         WHERE rr.t_r_r_m_code IN ({placeholders})
@@ -207,6 +212,11 @@ def team_rating_change(record: Optional[dict]) -> dict:
         before = TEAM_RATING_START if after is not None else None
     else:
         before = record["prev_rating_after"]
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    # 첫 경기이며 저장 후 점수가 없는 기존 기록만 초기 1500 대비 현재 팀 점수로 복원합니다.
+    if record and after is None and record.get("completed_match_count") == 1 and record.get("prev_count") == 0:
+        after = record.get("current_team_rating")
+        before = TEAM_RATING_START if after is not None else None
     has_change = before is not None and after is not None
     return {
         "rating_before": before,                              # 경기 전 팀 점수
@@ -264,6 +274,8 @@ def load_match_players(cursor, row: dict) -> dict:
         """
         SELECT cr.c_id_seq, c.c_name, c.c_rating, cr.c_r_r_team, cr.e_code,
             cr.c_r_r_statcode, cr.c_r_r_attendance, cr.c_r_r_rating_before, cr.c_r_r_rating_after,
+            (SELECT COUNT(DISTINCT history.c_r_r_code) FROM c_result_record history
+             WHERE history.c_id_seq=cr.c_id_seq AND history.c_r_r_score IS NOT NULL) AS completed_match_count,
             (
                 SELECT tr.t_id
                 FROM t_register AS tr
@@ -291,6 +303,10 @@ def load_match_players(cursor, row: dict) -> dict:
             side = "other"
         rating = item["c_rating"] if item["c_rating"] is not None else RATING_START
         before, after = item["c_r_r_rating_before"], item["c_r_r_rating_after"]
+        # 수정 일 : 2026-10-30 / 작업자 : 양태건
+        # 전체 완료 경기가 하나인 기존 첫 경기만 현재 점수 - 초기 1500으로 복원합니다.
+        if before is None and after is None and item.get("completed_match_count") == 1 and item["c_rating"] is not None:
+            before, after = RATING_START, item["c_rating"]
         has_change = before is not None and after is not None
         players[side].append({
             "c_id_seq": item["c_id_seq"],                         # 회원ID (종목별 ID)
@@ -365,6 +381,9 @@ def team_match_to_dict(row: dict, results: dict, stats: dict) -> dict:
     )
     status = match_status(row["team_start"], result)
     return {
+        # 수정 일 : 2026-10-29 / 작업자 : 양태건
+        # 프론트가 팀명으로 종목을 추측하지 않도록 실제 팀 종목을 반환합니다.
+        "e_code": {"축구": "SOCCER", "배구": "VOLLEYBALL", "농구": "BASKETBALL", "야구": "BASEBALL"}.get(row.get("home_category")) if row.get("home_category") == row.get("away_category") else None,
         "team_code": row["team_code"],                       # 매치코드
         "team_num": row["team_num"],                         # 경기 인원 (구장 수용인원)
         "team_start": row["team_start"],                     # 경기 시작 일시
@@ -500,4 +519,6 @@ def select_team_match(team_code: int):
         if connection is not None:
             connection.close()
 
-# 최종 수정 일 : 2026-10-29
+# 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

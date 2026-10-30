@@ -45,6 +45,14 @@ from FastAPI.images.select_banner_image import router as select_banner_image_rou
 from FastAPI.match.match_operations import router as match_operations_router
 # [추가 끝]
 
+# 수정 일 : 2026-10-27 / 작업자 : 양태건
+# 승인된 매니저 교육 API를 기존 training 테이블에 연결합니다.
+from FastAPI.education.education import router as education_router
+
+# 수정 일 : 2026-10-29 / 작업자 : 양태건
+# 기존 결과 테이블의 읽기 전용 개인·팀 결과 조회입니다.
+from FastAPI.match.manager_result_search import router as manager_result_search_router
+
 app = FastAPI(title="공In중개사 관리자 API")
 
 # Flutter 웹 클라이언트의 API 요청을 허용합니다.
@@ -76,7 +84,9 @@ app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"])
 # 수정일 : 2026-10-26
 # [추가 시작]
 app.include_router(match_operations_router)
+app.include_router(manager_result_search_router)
 # [추가 끝]
+app.include_router(education_router)
 app.include_router(admin_login_router)
 app.include_router(manager_login_router)
 app.include_router(match_manage_router)
@@ -110,3 +120,7 @@ if __name__ == "__main__":
 
     # .env의 API_HOST/API_PORT로 FastAPI 서버를 실행합니다.
     uvicorn.run(app, host=api_host, port=api_port)
+
+# 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+# 최종 수정 일 : 2026-10-29 / 작업자 : 양태건

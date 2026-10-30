@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../service/operations_api.dart';
+import 'admin_style.dart';
 
 class RecordsView extends ConsumerWidget {
   const RecordsView({super.key, required this.path, required this.builder});
@@ -47,7 +48,7 @@ class RecordDetails extends StatelessWidget {
     // [추가 시작] 이전 경기 결과의 원본 필드 표시명
     'c_r_r_team': '팀명',
     'c_r_r_score': '최종 스코어',
-    'e_code': '종목 코드',
+    'e_code': '종목',
     'c_r_r_statcode': '기존 스탯 코드',
     'c_r_r_attendance': '출석 여부',
     'c_r_r_date': '결과 등록일',
@@ -100,12 +101,24 @@ class RecordDetails extends StatelessWidget {
     'g_num': '수용 인원',
     'g_price': '이용 금액',
     'g_information': '이용 정보',
+    'assign_seq': '배정 번호',
+    'evaluate_seq': '평가 번호',
+    's_seq': '제재 번호',
+    'cs_seq': '제재 번호',
+    'hire_seq': '채용 번호',
+    'r_seq': '예약 번호',
+    'r_option': '신고 분류',
+    'h_name': '담당자',
+    'rs_time': '시작 시간',
+    're_time': '종료 시간',
   };
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: record.entries
-        .where((entry) => !entry.key.endsWith('_pw'))
+        // 수정 일 : 2026-10-28 / 작업자 : 양태건
+        // 알려진 표시명이 없는 내부 응답 키는 사용자 화면에 노출하지 않습니다.
+        .where((entry) => labels.containsKey(entry.key))
         .map(
           (entry) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -133,7 +146,7 @@ class RecordDetails extends StatelessWidget {
                         width: 130,
                         child: Text(
                           labels[entry.key] ?? entry.key,
-                          style: const TextStyle(color: Color(0xFF68756C)),
+                          style: const TextStyle(color: AdminStyle.muted),
                         ),
                       ),
                       Expanded(child: Text('${entry.value ?? '—'}')),
@@ -145,3 +158,5 @@ class RecordDetails extends StatelessWidget {
   );
 }
 // 최종 수정일 : 2026-10-24
+
+// 최종 수정 일 : 2026-10-28 / 작업자 : 양태건

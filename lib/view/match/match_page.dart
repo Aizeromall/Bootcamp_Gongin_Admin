@@ -7,7 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../service/operations_api.dart';
+import '../../vm/manager_result_notifier.dart';
 import '../shared/records_view.dart';
+import '../shared/admin_style.dart';
+import '../headquarters/admin_components.dart';
+import 'match_cancel_dialog.dart';
 
 const statLabels = {
   'goal': '골',
@@ -58,7 +62,7 @@ class MatchPage extends ConsumerWidget {
           child: Text(history ? '등록된 지난 매치가 없습니다.' : '배정된 요일·시간의 경기가 없습니다.'),
         );
       }
-      return RefreshIndicator(
+      final list = RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(operationsDataProvider('/match/operations'));
           await ref.read(operationsDataProvider('/match/operations').future);
@@ -91,7 +95,8 @@ class MatchPage extends ConsumerWidget {
                 onTap: () async {
                   final completed = await Navigator.of(context).push<bool>(
                     MaterialPageRoute<bool>(
-                      builder: (_) => MatchWorkflowPage(match: row),
+                      builder: (_) =>
+                          MatchWorkflowPage(match: row, managerId: managerId),
                     ),
                   );
                   if (!context.mounted) return;
@@ -103,6 +108,73 @@ class MatchPage extends ConsumerWidget {
           },
         ),
       );
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 850) return list;
+          final row = rows.first;
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 360,
+                child: ColoredBox(color: Colors.white, child: list),
+              ),
+              const VerticalDivider(width: 1, color: AdminStyle.line),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(22),
+                  children: [
+                    AdminCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          adminTitle('${row['g_name']}'),
+                          adminFields({
+                            '일시': '${row['r_date']} · ${row['rs_time']}',
+                            '예약 인원': row['count'],
+                            '결과':
+                                row['result_summary'] ??
+                                (row['scores'] == null
+                                    ? '—'
+                                    : "${row['scores']['A']} : ${row['scores']['B']}"),
+                          }),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.open_in_new, size: 18),
+                            label: Text(history ? '경기 결과 보기' : '출석 · 경기 운영 열기'),
+                            onPressed: () async {
+                              final completed = await Navigator.of(context)
+                                  .push<bool>(
+                                    MaterialPageRoute(
+                                      builder: (_) => MatchWorkflowPage(
+                                        match: row,
+                                        managerId: managerId,
+                                      ),
+                                    ),
+                                  );
+                              if (!context.mounted) return;
+                              ref.invalidate(
+                                operationsDataProvider('/match/operations'),
+                              );
+                              if (completed == true) onCompleted?.call();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    AdminCard(
+                      child: Text(
+                        history
+                            ? '목록에서 경기를 선택하면 저장된 경기 결과를 확인할 수 있습니다.'
+                            : '목록에서 경기를 선택해 출석 확인, 팀 설정, 경기 기록을 진행하세요.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      );
     },
   );
 }
@@ -111,8 +183,17 @@ class MatchPage extends ConsumerWidget {
 // 수정일 : 2026-10-26
 // [추가 시작] 화면을 떠나도 서버에서 출석·팀·시간·기록을 복원합니다.
 class MatchWorkflowPage extends ConsumerStatefulWidget {
-  const MatchWorkflowPage({super.key, required this.match});
+  const MatchWorkflowPage({
+    super.key,
+    required this.match,
+    this.managerId,
+    this.embedded = false,
+    this.onPublished,
+  });
+  final bool embedded;
+  final VoidCallback? onPublished;
   final Map<String, dynamic> match;
+  final String? managerId;
   @override
   ConsumerState<MatchWorkflowPage> createState() => _MatchWorkflowPageState();
 }
@@ -121,6 +202,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
   Map<String, dynamic>? data;
   String? error;
   bool busy = false;
+  bool checkingAll = false;
   int? selected;
   DateTime syncedAt = DateTime.now();
   Timer? timer;
@@ -203,7 +285,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             json: {'version': data!['version'], 'action': action, ...values},
           );
       if (mounted) setState(() => accept(result));
-      if (mounted) {
+      if (mounted && !widget.embedded) {
         ref.invalidate(operationsDataProvider('/match/operations'));
       }
       return true;
@@ -256,9 +338,10 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
 
   String eventLabel(String? kind) =>
       sportEvents.firstWhere(
-        (e) => e['kind'] == kind,
-        orElse: () => {'label': kind ?? ''},
-      )['label'] as String;
+            (e) => e['kind'] == kind,
+            orElse: () => {'label': kind ?? ''},
+          )['label']
+          as String;
 
   // 기록 목록 표시 (야구 홈런은 "홈런 2점 · 홈인 선수3" 처럼 점수·홈인 주자를 함께 표시)
   String eventText(Map event) {
@@ -297,11 +380,14 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                     value: chosen.contains(p['r_seq']),
                     title: Text('${p['c_name']}'),
                     // 3명을 고르면 나머지는 선택할 수 없음
-                    onChanged: !chosen.contains(p['r_seq']) && chosen.length >= 3
+                    onChanged:
+                        !chosen.contains(p['r_seq']) && chosen.length >= 3
                         ? null
-                        : (checked) => setDialog(() => checked == true
-                              ? chosen.add(p['r_seq'] as int)
-                              : chosen.remove(p['r_seq'])),
+                        : (checked) => setDialog(
+                            () => checked == true
+                                ? chosen.add(p['r_seq'] as int)
+                                : chosen.remove(p['r_seq']),
+                          ),
                   ),
               ],
             ),
@@ -350,7 +436,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
   );
   Widget actionButton(String text, VoidCallback? action, {IconData? icon}) =>
       FilledButton.icon(
-        onPressed: busy ? null : action,
+        onPressed: busy || checkingAll ? null : action,
         icon: Icon(icon ?? Icons.chevron_right),
         label: Padding(padding: const EdgeInsets.all(12), child: Text(text)),
       );
@@ -362,6 +448,22 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
         ? ThemeData.dark(useMaterial3: true).copyWith(
             scaffoldBackgroundColor: const Color(0xFF0E172D),
             cardColor: const Color(0xFF18243F),
+            textTheme: Theme.of(context).textTheme
+                .apply(bodyColor: Colors.white, displayColor: Colors.white),
+            cardTheme: const CardThemeData(
+              color: Color(0xFF18243F),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(14)),
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
             colorScheme: ColorScheme.fromSeed(
               seedColor: Colors.blue,
               brightness: Brightness.dark,
@@ -372,26 +474,28 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
       data: theme,
       child: Builder(
         builder: (context) => Scaffold(
-          appBar: AppBar(
-            title: Text(
-              data == null
-                  ? '경기 불러오기'
-                  : switch (status) {
-                      'teams' => '팀 설정',
-                      'live' => '경기 진행',
-                      'review' => '결과 확인 · 등록',
-                      'completed' => '지난 매치 · 경기 결과',
-                      _ => '내 매치 · 출석 확인',
-                    },
-            ),
-            actions: [
-              IconButton(
-                tooltip: '다시 불러오기',
-                onPressed: busy ? null : load,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
+          appBar: widget.embedded
+              ? null
+              : AppBar(
+                  title: Text(
+                    data == null
+                        ? '경기 불러오기'
+                        : switch (status) {
+                            'teams' => '팀 설정',
+                            'live' => '경기 진행',
+                            'review' => '결과 확인 · 등록',
+                            'completed' => '지난 매치 · 경기 결과',
+                            _ => '내 매치 · 출석 확인',
+                          },
+                  ),
+                  actions: [
+                    IconButton(
+                      tooltip: '다시 불러오기',
+                      onPressed: busy ? null : load,
+                      icon: const Icon(Icons.refresh),
+                    ),
+                  ],
+                ),
           body: data == null
               ? Center(
                   child: busy
@@ -426,7 +530,14 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                         vertical: 10,
                       ),
                       child: Text(
-                        '${widget.match['g_name']} · ${widget.match['r_date']} ${widget.match['rs_time']}',
+                        [
+                              widget.match['g_name'],
+                              widget.match['r_date'],
+                              widget.match['rs_time'],
+                            ]
+                            .whereType<String>()
+                            .where((v) => v.isNotEmpty)
+                            .join(' · '),
                       ),
                     ),
                     // 작업자 : 양태건
@@ -459,6 +570,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
 
   Widget attendanceScreen() {
     final attendance = Map<String, dynamic>.from(state['attendance']);
+    final rules = ref.watch(managerRatingRulesProvider);
     final filtered = players
         .where(
           (p) => '${p['c_name']} ${p['r_seq']}'.contains(search.text.trim()),
@@ -467,6 +579,37 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
+        // 수정 일 : 2026-10-29 / 작업자 : 양태건
+        // 선택한 예정 경기의 실제 정보와 현재 출석 현황을 같은 상세 영역에 표시합니다.
+        section(
+          '${widget.match['g_name'] ?? '구장'}',
+          Wrap(
+            spacing: 24,
+            runSpacing: 16,
+            children: [
+              Text(
+                '일시\n${widget.match['r_date'] ?? ''} ${widget.match['rs_time'] ?? ''}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const Text('유형\n실력매칭'),
+              Text('종목\n${data?['sport']?['name'] ?? '미확인'}'),
+              Text(
+                '출석\n${attendance.values.where((value) => value == true).length} / ${players.length}명',
+              ),
+            ],
+          ),
+        ),
+        if (rules.hasError)
+          TextButton(
+            onPressed: () => ref.invalidate(managerRatingRulesProvider),
+            child: const Text('레벨 기준을 불러오지 못했습니다. 다시 시도'),
+          ),
+        section(
+          '시간 · 출석 안내',
+          const Text(
+            '경기 전 예약자 명단을 확인하고 도착한 회원의 출석을 체크해 주세요.\n시작 이후 미확인 인원은 현장에서 확인해 주세요. 자동 알림 발송 기능은 연결되어 있지 않습니다.',
+          ),
+        ),
         section(
           '예약자 명단 · 출석 확인 (${attendance.values.where((v) => v == true).length}/${players.length}명)',
           Column(
@@ -480,6 +623,32 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 ),
               ),
               const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton(
+                  onPressed: busy || checkingAll
+                      ? null
+                      : () async {
+                          setState(() => checkingAll = true);
+                          try {
+                            for (final player in players) {
+                              if (state['attendance']['${player['r_seq']}'] ==
+                                  true) {
+                                continue;
+                              }
+                              final saved = await command('attendance', {
+                                'r_seq': player['r_seq'],
+                                'attendance': true,
+                              });
+                              if (!mounted || !saved) break;
+                            }
+                          } finally {
+                            if (mounted) setState(() => checkingAll = false);
+                          }
+                        },
+                  child: Text(checkingAll ? '출석 확인 중…' : '전원 출석'),
+                ),
+              ),
               for (final p in filtered)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -488,7 +657,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                   ),
                   title: Text('${p['c_name']}'),
                   subtitle: Text(
-                    '${p['c_position'] ?? '포지션 미등록'} · 예약 ${p['r_seq']}',
+                    '${rules.asData?.value.tier(p['c_rating']) ?? '레벨 미확인'} · ${p['c_position'] ?? '포지션 미등록'} · 예약 ${p['r_seq']}',
                   ),
                   trailing: Wrap(
                     spacing: 6,
@@ -496,7 +665,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                       FilterChip(
                         label: const Text('출석'),
                         selected: attendance['${p['r_seq']}'] == true,
-                        onSelected: busy
+                        onSelected: busy || checkingAll
                             ? null
                             : (_) => command('attendance', {
                                 'r_seq': p['r_seq'],
@@ -506,7 +675,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                       FilterChip(
                         label: const Text('결석'),
                         selected: attendance['${p['r_seq']}'] == false,
-                        onSelected: busy
+                        onSelected: busy || checkingAll
                             ? null
                             : (_) => command('attendance', {
                                 'r_seq': p['r_seq'],
@@ -532,6 +701,49 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                     ? () => command('teams')
                     : null,
               ),
+              if (widget.managerId != null && widget.match['g_code'] != null)
+                TextButton.icon(
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: const Text('경기 취소'),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final date = '${widget.match['r_date'] ?? ''}';
+                          final time = '${widget.match['rs_time'] ?? ''}';
+                          if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) ||
+                              !RegExp(r'^([01]\d|2[0-3]):[0-5]\d(:00)?$')
+                                  .hasMatch(time)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('경기 일시를 확인할 수 없습니다. 다시 불러와 주세요.'),
+                              ),
+                            );
+                            return;
+                          }
+                          final cancelled = await showDialog<bool>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => MatchCancelDialog(
+                              groundName: '${widget.match['g_name'] ?? '구장'}',
+                              target: (
+                                managerId: widget.managerId!,
+                                groundCode: '${widget.match['g_code']}',
+                                date: date,
+                                start: time.substring(0, 5),
+                              ),
+                            ),
+                          );
+                          if (cancelled == true && mounted) {
+                            final messenger = ScaffoldMessenger.of(context);
+                            Navigator.of(context).pop(false);
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('경기 예약 취소가 처리되었습니다.'),
+                              ),
+                            );
+                          }
+                        },
+                ),
             ],
           ),
         ),
@@ -670,46 +882,115 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
     );
   }
 
-  Widget scoreboard() => section(
-    '경기 ${status == 'live' ? '진행 중' : '결과'}',
-    Column(
-      children: [
-        Wrap(
-          alignment: WrapAlignment.center,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 24,
-          children: [
-            Text(
-              '${state['team_names'][0]}',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              '${data!['scores']['A']} : ${data!['scores']['B']}',
-              style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w900),
-            ),
-            Text(
-              '${state['team_names'][1]}',
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        // 작업자 : 양태건
-        // 수정일 : 2026-10-26
-        // 기록된 경기 시간이 없는 결과에서는 시간 영역을 표시하지 않습니다.
-        if (state['duration_unknown'] != true)
-          Text(
-            clockText(seconds),
-            style: const TextStyle(
-              fontSize: 28,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
+  // 수정 일 : 2026-10-28 / 작업자 : 양태건
+  // 진행 중 점수판은 상단 한 줄로 모으고 기록 버튼은 두 열로 배치합니다.
+  Widget scoreboard() => status == 'live'
+      ? Container(
+          margin: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0B1326),
+            borderRadius: BorderRadius.circular(14),
           ),
-        Text(
-          '기록 ${(state['events'] as List).length}건${status == 'live' && state['running_since'] == null ? ' · 일시정지' : ''}',
-        ),
-      ],
-    ),
-  );
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${state['team_names'][0]}',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              Column(
+                children: [
+                  Text(
+                    '${data!['scores']['A']} : ${data!['scores']['B']}',
+                    style: const TextStyle(
+                      fontSize: 44,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  if (state['duration_unknown'] != true)
+                    Text(
+                      clockText(seconds),
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  Text(
+                    state['running_since'] == null ? '일시정지' : '경기 진행 중',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF9AAAC8),
+                    ),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: Text(
+                  '${state['team_names'][1]}',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        )
+      : section(
+          '경기 ${status == 'live' ? '진행 중' : '결과'}',
+          Column(
+            children: [
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 24,
+                children: [
+                  Text(
+                    '${state['team_names'][0]}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '${data!['scores']['A']} : ${data!['scores']['B']}',
+                    style: const TextStyle(
+                      fontSize: 44,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    '${state['team_names'][1]}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              // 작업자 : 양태건
+              // 수정일 : 2026-10-26
+              // 기록된 경기 시간이 없는 결과에서는 시간 영역을 표시하지 않습니다.
+              if (state['duration_unknown'] != true)
+                Text(
+                  clockText(seconds),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              Text(
+                '기록 ${(state['events'] as List).length}건${status == 'live' && state['running_since'] == null ? ' · 일시정지' : ''}',
+              ),
+            ],
+          ),
+        );
 
   Widget playerList(String team) => section(
     '${state['team_names'][team == 'A' ? 0 : 1]} · ${teamPlayers(team).length}명',
@@ -752,40 +1033,44 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              // 작업자 : 신현진 / 수정일 : 2026-10-29 종목별 기록 버튼
-              for (final e in sportEvents)
-                SizedBox(
-                  width: 130,
-                  child: actionButton(
-                    '${e['label']}',
-                    selected == null
-                        ? null
-                        : () async {
-                            // 야구 홈런은 홈인한 주자를 고른 뒤 한 번에 기록
-                            if (e['runners'] == true) {
-                              final runners = await pickRunners();
-                              if (runners == null || !mounted) return;
+          // 수정 일 : 2026-10-29 / 작업자 : 양태건
+          // 새 종목별 기록·주자 선택을 기존 모바일 두 열 배치와 병합합니다.
+          LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                // 작업자 : 신현진 / 수정일 : 2026-10-29 종목별 기록 버튼
+                for (final e in sportEvents)
+                  SizedBox(
+                    width: (constraints.maxWidth - 12) / 2,
+                    child: actionButton(
+                      '${e['label']}',
+                      selected == null
+                          ? null
+                          : () async {
+                              if (e['runners'] == true) {
+                                final runners = await pickRunners();
+                                if (runners == null || !mounted) return;
+                                await command('event', {
+                                  'r_seq': selected,
+                                  'kind': e['kind'],
+                                  'runners': runners,
+                                });
+                                return;
+                              }
                               await command('event', {
                                 'r_seq': selected,
                                 'kind': e['kind'],
-                                'runners': runners,
                               });
-                              return;
-                            }
-                            await command('event', {
-                              'r_seq': selected,
-                              'kind': e['kind'],
-                            });
-                          },
-                    // 우리 팀 점수가 나는 버튼은 종목 아이콘
-                    icon: ((e['own'] ?? 0) as num) > 0 ? scoreIcon : Icons.add,
+                            },
+                      icon: ((e['own'] ?? 0) as num) > 0
+                          ? scoreIcon
+                          : Icons.add,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           TextButton(
@@ -915,7 +1200,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
         ),
       injuryRecords(),
       actionButton(
-        '지난 매치 목록으로',
+        '실력매칭 결과 목록으로',
         () => Navigator.of(context).pop(true),
         icon: Icons.arrow_back,
       ),
@@ -939,7 +1224,10 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                     columns: [
                       const DataColumn(label: Text('회원')),
                       for (final stat in sportStats)
-                        DataColumn(label: Text('${stat['label']}'), numeric: true),
+                        DataColumn(
+                          label: Text('${stat['label']}'),
+                          numeric: true,
+                        ),
                     ],
                     rows: [
                       for (final p in teamPlayers(team))
@@ -948,7 +1236,9 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                             DataCell(Text('${p['c_name']}')),
                             for (final stat in sportStats)
                               DataCell(
-                                Text('${data!['stats']['${p['r_seq']}'][stat['key']] ?? 0}'),
+                                Text(
+                                  '${data!['stats']['${p['r_seq']}'][stat['key']] ?? 0}',
+                                ),
                               ),
                           ],
                         ),
@@ -987,7 +1277,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      '등록하면 모든 회원의 결과가 함께 저장되고 지난 매치로 이동합니다. 등록 후에는 수정할 수 없습니다.',
+                      '등록하면 모든 회원의 결과가 함께 저장되고 실력매칭 결과로 이동합니다. 등록 후에는 수정할 수 없습니다.',
                     ),
                     const SizedBox(height: 16),
                     Wrap(
@@ -1004,11 +1294,17 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text(
-                                  '결과가 등록되었습니다. 지난 매치에서 확인할 수 있습니다.',
+                                  '결과가 등록되었습니다. 실력매칭에서 확인할 수 있습니다.',
                                 ),
                               ),
                             );
-                            Navigator.of(context).pop(true);
+                            ref.invalidate(managerResultsProvider);
+                            ref.invalidate(managerResultDetailProvider);
+                            if (widget.embedded) {
+                              widget.onPublished?.call();
+                            } else {
+                              Navigator.of(context).pop(true);
+                            }
                           }
                         }, icon: Icons.save),
                       ],
@@ -1017,11 +1313,13 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 ),
               ),
             if (status == 'completed')
-              actionButton(
-                '지난 매치 목록으로',
-                () => Navigator.of(context).pop(true),
-                icon: Icons.check_circle,
-              ),
+              actionButton('실력매칭 결과 목록으로', () {
+                if (widget.embedded) {
+                  widget.onPublished?.call();
+                } else {
+                  Navigator.of(context).pop(true);
+                }
+              }, icon: Icons.check_circle),
           ],
         );
 
@@ -1213,3 +1511,5 @@ class _InjurySheetState extends State<InjurySheet> {
   );
 }
 // [추가 끝]
+
+// 최종 수정 일 : 2026-10-28 / 작업자 : 양태건

@@ -17,10 +17,10 @@ from database import connect
 _SIGNING_KEY = (os.getenv("MANAGER_TOKEN_SECRET") or secrets.token_urlsafe(48)).encode()
 
 
-def issue_manager_session(manager_id: str) -> str:
+def _issue_staff_session(subject: str, role: str, field: str) -> str:
     payload = dict(
-        m_id=manager_id,
-        role="manager",
+        **{field: subject},
+        role=role,
         exp=int(time.time()) + 43200,
         nonce=secrets.token_hex(16),
     )
@@ -33,7 +33,7 @@ def issue_manager_session(manager_id: str) -> str:
     return encoded + "." + signature
 
 
-def verify_manager_token(token: str) -> str:
+def _verify_staff_token(token: str, role: str, field: str) -> str:
     try:
         encoded, signature = token.split(".")
         expected = hmac.new(_SIGNING_KEY, encoded.encode(), hashlib.sha256).hexdigest()
@@ -43,17 +43,35 @@ def verify_manager_token(token: str) -> str:
             base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
         )
         if (
-            payload["role"] != "manager"
+            payload["role"] != role
             or payload["exp"] <= time.time()
-            or not isinstance(payload["m_id"], str)
-            or not payload["m_id"]
+            or not isinstance(payload[field], str)
+            or not payload[field]
         ):
             raise ValueError("payload")
-        return payload["m_id"]
+        return payload[field]
     except (ValueError, KeyError, TypeError, UnicodeError):
         raise HTTPException(
             401, "로그인이 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요."
         ) from None
+
+
+# 수정 일 : 2026-10-27 / 작업자 : 양태건
+# 교육 API도 기존 서명 토큰을 사용하며 본사·매니저 토큰의 역할은 혼용하지 않습니다.
+def issue_manager_session(manager_id: str) -> str:
+    return _issue_staff_session(manager_id, 'manager', 'm_id')
+
+
+def verify_manager_token(token: str) -> str:
+    return _verify_staff_token(token, 'manager', 'm_id')
+
+
+def issue_headquarters_session(staff_id: str) -> str:
+    return _issue_staff_session(staff_id, 'headquarters', 'h_id')
+
+
+def verify_headquarters_token(token: str) -> str:
+    return _verify_staff_token(token, 'headquarters', 'h_id')
 
 
 def require_manager(authorization: str = Header(default="")) -> str:
@@ -77,3 +95,5 @@ def require_manager(authorization: str = Header(default="")) -> str:
 
 
 # [수정 끝]
+
+# 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
