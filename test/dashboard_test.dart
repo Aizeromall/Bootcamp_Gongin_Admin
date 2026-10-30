@@ -3,12 +3,27 @@
 // [수정 시작] 경기 진행과 지난 매치 이동을 검증합니다.
 import 'dart:convert';
 
+import 'package:bootcamp_project_gongin_admin_app/vm/login_notifier.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:bootcamp_project_gongin_admin_app/model/login_role.dart';
 import 'package:bootcamp_project_gongin_admin_app/service/operations_api.dart';
 import 'package:bootcamp_project_gongin_admin_app/view/dashboard/dashboard_page.dart';
+import 'package:bootcamp_project_gongin_admin_app/view/match/match_page.dart';
+
+class DashboardLogin extends LoginNotifier {
+  @override
+  AsyncValue<StaffSession?> build() =>
+      const AsyncData(StaffSession(userId: 'test', role: LoginRole.manager));
+}
+
+String get testMatchDate => DateTime.now()
+    .toUtc()
+    .add(const Duration(hours: 9))
+    .toIso8601String()
+    .substring(0, 10);
 
 class FakeApi extends OperationsApi {
   String status = 'attendance';
@@ -54,19 +69,89 @@ class FakeApi extends OperationsApi {
     ) as Map<String, dynamic>;
   }
 
+  Map<String, dynamic> get resultFixture {
+    final oldRows = (detail['state']['legacy_records'] as List? ?? []);
+    final members = oldRows.isNotEmpty
+        ? [
+            for (final row in oldRows)
+              {
+                'name': row['c_name'],
+                'current_tier': null,
+                'current_rating': null,
+                'rating_change': null,
+                'record_text': row['c_r_r_statcode'],
+              },
+          ]
+        : [
+            for (final player in state['players'] as List)
+              {
+                'name': player['c_name'],
+                'stats': detail['stats']['${player['r_seq']}'],
+                'rating_change': null,
+              },
+          ];
+    return {
+      'code': '1_20261029_190000',
+      'kind': 'pickup',
+      'ground': '테스트 구장',
+      'date': testMatchDate,
+      'time': '19:00',
+      'home': '블루팀',
+      'away': '화이트팀',
+      'home_score': oldRows.isEmpty ? detail['scores']['A'] : null,
+      'away_score': oldRows.isEmpty ? detail['scores']['B'] : null,
+      'raw_score': oldRows.isEmpty ? null : oldRows.first['c_r_r_score'],
+      'stat_columns': [
+        {'key': 'goal', 'label': '골'},
+      ],
+      'sides': [
+        {'name': '블루팀', 'members': members},
+      ],
+    };
+  }
+
   @override
   Future<Map<String, dynamic>> request(
     String path, {
     Map<String, dynamic>? json,
     Map<String, String>? form,
   }) async {
+    if (path == '/match/manager/upcoming') {
+      final rows = await request('/match/operations');
+      return {
+        'operations': status == 'completed' ? [] : rows['results'],
+        'teams': [],
+      };
+    }
+    if (path == '/match/rating/stat_keys') {
+      return {
+        'tiers': [
+          {'min_rating': 1500, 'name': '비기너 1'},
+        ],
+      };
+    }
+    if (path.startsWith('/match/manager/results/')) return resultFixture;
+    if (path.startsWith('/match/manager/results')) {
+      return {
+        'results': status == 'completed' ? [resultFixture] : [],
+      };
+    }
+    if (path.startsWith('/match/schedule/test')) {
+      return {
+        'm_id': 'test',
+        'r_date': Uri.parse(path).queryParameters['r_date'],
+        'grounds': [],
+      };
+    }
     if (path == '/match/operations') {
       return {
         'results': [
           {
             'r_seq': 1,
+            'g_code': 1,
+            'e_code': 'SOCCER',
             'g_name': '테스트 구장',
-            'r_date': '2026-10-26',
+            'r_date': testMatchDate,
             'rs_time': '19:00',
             'status': status,
             'count': 2,
@@ -161,7 +246,10 @@ class LegacyApi extends FakeApi {
 
 void main() {
   Widget app(LoginRole role, FakeApi api) => ProviderScope(
-    overrides: [operationsApiProvider.overrideWithValue(api)],
+    overrides: [
+      operationsApiProvider.overrideWithValue(api),
+      loginProvider.overrideWith(DashboardLogin.new),
+    ],
     child: MaterialApp(
       home: DashboardPage(role: role, userId: 'test', onLogout: () {}),
     ),
@@ -169,7 +257,9 @@ void main() {
   testWidgets('본사 메뉴에서 문의 관리로 이동', (tester) async {
     await tester.pumpWidget(app(LoginRole.headquarters, FakeApi()));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.question_answer_outlined));
+    // 수정 일 : 2026-10-27 / 작업자 : 양태건
+    // 공통 사이드바의 실제 문의 메뉴를 선택해 기존 답변 동작을 검증합니다.
+    await tester.tap(find.byKey(const ValueKey('education-nav-2')));
     await tester.pumpAndSettle();
     expect(find.text('답변 대기'), findsOneWidget);
     expect(find.text('문의가 없습니다.'), findsOneWidget);
@@ -182,16 +272,32 @@ void main() {
     final api = FakeApi();
     await tester.pumpWidget(app(LoginRole.manager, api));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('테스트 구장'));
+    await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilterChip, '출석').first);
+    final attendanceScroll = find
+        .descendant(
+          of: find.byType(MatchWorkflowPage),
+          matching: find.byType(Scrollable),
+        )
+        .last;
+    await tester.scrollUntilVisible(
+      find.text('전원 출석'),
+      180,
+      scrollable: attendanceScroll,
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilterChip, '출석').last);
+    await tester.tap(find.text('전원 출석'));
     await tester.pumpAndSettle();
     expect(
       (api.state['attendance'] as Map).values.every((v) => v == true),
       isTrue,
     );
+    await tester.scrollUntilVisible(
+      find.text('경기 시작 · 팀 설정'),
+      180,
+      scrollable: attendanceScroll,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('경기 시작 · 팀 설정'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('A팀').first);
@@ -207,10 +313,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('골 1'), findsOneWidget);
     expect(find.text('1 : 0'), findsOneWidget);
+    await tester.ensureVisible(find.text('마지막 기록 취소'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('마지막 기록 취소'));
     await tester.pumpAndSettle();
-    expect(find.text('0 : 0'), findsOneWidget);
+    expect(api.detail['scores'], {'A': 0, 'B': 0});
+    await tester.ensureVisible(find.widgetWithText(FilledButton, '골'));
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '골'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('응급 · 부상 기록'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('응급 · 부상 기록'));
     await tester.pumpAndSettle();
@@ -236,10 +348,10 @@ void main() {
     await tester.tap(find.text('결과 등록'));
     await tester.pumpAndSettle();
     expect(api.status, 'completed');
-    expect(find.text('공IN · 지난 매치'), findsOneWidget);
-    await tester.tap(find.text('테스트 구장'));
+    expect(find.text('공IN · 실력매칭'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
-    expect(find.text('지난 매치 · 경기 결과'), findsOneWidget);
+    expect(find.text('경기 결과'), findsOneWidget);
     expect(find.text('1 : 0'), findsOneWidget);
   });
   testWidgets('기존 결과는 지난 매치에서 원문으로 조회하고 재등록하지 않는다', (tester) async {
@@ -248,12 +360,12 @@ void main() {
     expect(find.text('테스트 구장'), findsNothing);
     await tester.tap(find.byIcon(Icons.history));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('테스트 구장'));
+    await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
-    expect(find.text('기존 경기 결과'), findsOneWidget);
-    expect(find.text('기존 회원'), findsOneWidget);
-    expect(find.text('5'), findsOneWidget);
-    expect(find.text('100'), findsOneWidget);
+    expect(find.text('경기 결과'), findsOneWidget);
+    expect(find.textContaining('기존 회원'), findsOneWidget);
+    expect(find.text('원본 스코어: 5'), findsOneWidget);
+    expect(find.textContaining('기록 원문: 100'), findsOneWidget);
     expect(find.text('결과 등록'), findsNothing);
     expect(find.text('0 : 0'), findsNothing);
   });
@@ -265,17 +377,37 @@ void main() {
     final api = FakeApi();
     await tester.pumpWidget(app(LoginRole.manager, api));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('테스트 구장'));
+    await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    for (var i = 0; i < 2; i++) {
-      await tester.tap(find.widgetWithText(FilterChip, '출석').at(i));
-      await tester.pumpAndSettle();
-    }
-    await tester.ensureVisible(find.text('경기 시작 · 팀 설정'));
+    final attendanceScroll = find
+        .descendant(
+          of: find.byType(MatchWorkflowPage),
+          matching: find.byType(Scrollable),
+        )
+        .last;
+    await tester.scrollUntilVisible(
+      find.text('전원 출석'),
+      180,
+      scrollable: attendanceScroll,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('전원 출석'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('경기 시작 · 팀 설정'),
+      180,
+      scrollable: attendanceScroll,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('경기 시작 · 팀 설정'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 }
 // [수정 끝]
+// 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-29 / 작업자 : 양태건

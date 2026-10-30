@@ -15,6 +15,10 @@ from dotenv import load_dotenv
 # APIRouter는 로그인 주소를 등록하고, Body는 JSON 본문 값을 받아옴
 from fastapi import APIRouter, Body, HTTPException, status
 
+# 수정 일 : 2026-10-27 / 작업자 : 양태건
+# 본사 전용 교육 API에서 요청자의 역할을 검증할 서명 토큰입니다.
+from ..match.manager_session import issue_headquarters_session
+
 
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
@@ -144,6 +148,7 @@ def login_admin(
             "h_position": headquarter[2],
             "h_department": headquarter[3],
             "role": "headquarters",
+            "access_token": issue_headquarters_session(headquarter[0]),
         }
         # [수정 3 끝]
 
@@ -188,3 +193,4 @@ def login_admin(
 
 # 최종 수정일 : 2026-10-26
 # 작업자 : 양태건
+# 최종 수정 일 : 2026-10-27 / 작업자 : 양태건

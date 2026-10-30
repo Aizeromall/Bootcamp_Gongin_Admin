@@ -138,7 +138,7 @@ ROSTER_SQL = """
  SELECT r.r_seq, r.c_id_seq, r.g_code, r.r_date,
         TIME_FORMAT(r.rs_time, '%%H:%%i:%%s') AS rs_time,
         TIME_FORMAT(r.re_time, '%%H:%%i:%%s') AS re_time,
-        g.g_name, c.c_name, c.c_position, c.c_rating, c.c_prefer_stock,
+        g.g_name, g.g_num, c.c_name, c.c_position, c.c_rating, c.c_prefer_stock,
         CONCAT(r.g_code, '_', DATE_FORMAT(r.r_date, '%%Y%%m%%d'), '_',
                TIME_FORMAT(r.rs_time, '%%H%%i%%s')) AS match_code
  FROM reservation r JOIN ground g ON g.g_code = r.g_code
@@ -903,11 +903,17 @@ def match_list(manager_id: str = Depends(require_manager)):
                         match_code=code,
                         r_seq=row["r_seq"],
                         g_name=row["g_name"],
+                        # 수정 일 : 2026-10-29 / 작업자 : 양태건
+                        # 종목 필터·요약은 기존 예약자의 종목과 구장 정원을 사용합니다.
+                        g_code=row["g_code"], g_num=row.get("g_num"), re_time=row.get("re_time"),
+                        e_code=SPORT_BY_SEQUENCE.get(str(row.get("c_prefer_stock"))),
                         r_date=str(row["r_date"]),
                         rs_time=row["rs_time"],
                         count=0,
                         status="attendance",
                     )
+                if groups[code].get("e_code") != SPORT_BY_SEQUENCE.get(str(row.get("c_prefer_stock"))):
+                    groups[code]["e_code"] = None
                 groups[code]["count"] += 1
                 if own:
                     groups[code].update(
@@ -972,3 +978,5 @@ def match_command(
 
 
 # [수정 끝]
+
+# 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
