@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 문의 목록·대화·답변을 좌우 분할하고 저장 실패 시 작성 내용을 보존합니다.
@@ -18,11 +20,27 @@ class InquiryPage extends ConsumerStatefulWidget {
   ConsumerState<InquiryPage> createState() => _InquiryPageState();
 }
 
-class _InquiryPageState extends ConsumerState<InquiryPage> {
-  String filter = '';
-  int? selected;
+class _InquiryPageState extends ConsumerState<InquiryPage>
+    with AsyncScreenState<InquiryPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'filter': '',
+    'selected': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String get filter => screenValue<String>('filter');
+  set filter(String value) => setScreenValue('filter', value);
+  int? get selected => screenValue<int?>('selected');
+  set selected(int? value) => setScreenValue('selected', value);
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final path = '/inquiry/list${filter.isEmpty ? '' : '?i_state=$filter'}';
     return Column(
       children: [
@@ -37,7 +55,7 @@ class _InquiryPageState extends ConsumerState<InquiryPage> {
                 ButtonSegment(value: '1', label: Text('답변 완료')),
               ],
               selected: {filter},
-              onSelectionChanged: (v) => setState(() {
+              onSelectionChanged: (v) => updateScreen(() {
                 filter = v.first;
                 selected = null;
               }),
@@ -53,7 +71,7 @@ class _InquiryPageState extends ConsumerState<InquiryPage> {
               final id = selected ?? adminInt(rows.first['i_seq']);
               return AdminSplitView(
                 selected: selected != null,
-                onBack: () => setState(() => selected = null),
+                onBack: () => updateScreen(() => selected = null),
                 list: ListView(
                   children: [
                     for (final row in rows)
@@ -78,8 +96,9 @@ class _InquiryPageState extends ConsumerState<InquiryPage> {
                             '${row['i_state']}' == '1' ? '답변 완료' : '대기',
                             alert: '${row['i_state']}' != '1',
                           ),
-                          onTap: () =>
-                              setState(() => selected = adminInt(row['i_seq'])),
+                          onTap: () => updateScreen(
+                            () => selected = adminInt(row['i_seq']),
+                          ),
                         ),
                       ),
                   ],
@@ -215,8 +234,15 @@ class AnswerDialog extends ConsumerStatefulWidget {
   ConsumerState<AnswerDialog> createState() => _AnswerDialogState();
 }
 
-class _AnswerDialogState extends ConsumerState<AnswerDialog> {
-  final text = TextEditingController();
+class _AnswerDialogState extends ConsumerState<AnswerDialog>
+    with AsyncScreenState<AnswerDialog> {
+  @override
+  Map<String, Object?> initialScreenValues() => {};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+  late final text = screenTextController('text');
   final form = GlobalKey<FormState>();
   @override
   void dispose() {
@@ -226,6 +252,7 @@ class _AnswerDialogState extends ConsumerState<AnswerDialog> {
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final mutation = ref.watch(adminMutationProvider(widget.staffId));
     return PopScope(
       canPop: !mutation.isLoading,
@@ -288,3 +315,5 @@ class _AnswerDialogState extends ConsumerState<AnswerDialog> {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

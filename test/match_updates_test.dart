@@ -147,7 +147,7 @@ void main() {
       CancelledMatch.fromJson(api.cancellation('3')).reasonName,
       '노쇼 및 환불',
     );
-    expect(CancelledMatch.fromJson(api.cancellation(1)).reasonName, '정원 미달');
+    expect(CancelledMatch.fromJson(api.cancellation(1)).reasonName, '시설 문제');
   });
   test('취소 목록에서 회원 직접 취소 4를 제외하고 매니저 전용 URL과 정수 필터를 사용한다', () async {
     final api = UpdatesApi();
@@ -303,5 +303,47 @@ void main() {
     expect(find.byType(MatchCancelDialog), findsNothing);
     expect(t.takeException(), isNull);
   });
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  testWidgets('시설 문제 사유와 노쇼 결석자 패널티 안내를 구분한다', (t) async {
+    final api = UpdatesApi();
+    const target = (
+      managerId: 'manager1',
+      groundCode: '7',
+      date: '2026-10-30',
+      start: '19:00',
+    );
+    await t.pumpWidget(
+      app(
+        api,
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => const MatchCancelDialog(
+                target: target,
+                groundName: '구장',
+                absentCount: 2,
+              ),
+            ),
+            child: const Text('취소 창 열기'),
+          ),
+        ),
+      ),
+    );
+    await tap(t, find.text('취소 창 열기'));
+    await tap(t, find.text('취소 사유'));
+    expect(find.text('시설 문제'), findsOneWidget);
+    expect(find.text('정원 미달'), findsNothing);
+    await tap(t, find.text('노쇼 및 환불').last);
+    expect(find.textContaining('결석 확인 2명'), findsOneWidget);
+    expect(find.textContaining('최저 1000점'), findsOneWidget);
+    expect(find.textContaining('출석·미확인 회원은 제외'), findsOneWidget);
+    await tap(t, find.byType(DropdownButtonFormField<int>));
+    await tap(t, find.text('시설 문제').last);
+    expect(find.text('시설 문제·우천 취소에는 점수 패널티가 적용되지 않습니다.'), findsOneWidget);
+    expect(api.patchCount, 0);
+  });
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

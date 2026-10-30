@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 기존 양식·결재자·소유주·매니저 조회를 사용해 네 종류의 품의를 작성합니다.
 import 'package:file_selector/file_selector.dart';
@@ -8,6 +10,8 @@ import '../../model/headquarters_model.dart';
 import '../../service/headquarters_service.dart';
 import '../../vm/headquarters_notifier.dart';
 import 'admin_components.dart';
+import 'ground_location_picker.dart';
+import '../../vm/ground_location_notifier.dart';
 
 class ApprovalWriter extends ConsumerStatefulWidget {
   const ApprovalWriter({super.key, required this.staffId});
@@ -16,19 +20,69 @@ class ApprovalWriter extends ConsumerStatefulWidget {
   ConsumerState<ApprovalWriter> createState() => _ApprovalWriterState();
 }
 
-class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
+class _ApprovalWriterState extends ConsumerState<ApprovalWriter>
+    with AsyncScreenState<ApprovalWriter> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'template': null,
+    'ground': null,
+    'contract': null,
+    'owner': null,
+    'kind': null,
+    'deputy': null,
+    'ownerMode': '신규',
+    'sport': '축구',
+    'approvers': <String, String>{},
+    'photos': <String>[],
+    'assignments': <AdminRow>[],
+    'picking': false,
+    'localError': null,
+    'success': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+    'approvers': Map<String, String>.from(values['approvers'] as Map),
+    'photos': List<String>.from(values['photos'] as List),
+    'assignments': List<AdminRow>.from(values['assignments'] as List),
+  };
+
   final form = GlobalKey<FormState>();
   final inputs = <String, TextEditingController>{};
-  int? template, ground, contract, owner;
-  String? kind, deputy;
-  String ownerMode = '신규', sport = '축구';
-  final approvers = <String, String>{};
-  final photos = <String>[];
-  final assignments = <AdminRow>[];
-  bool picking = false;
-  String? localError, success;
+  int? get template => screenValue<int?>('template');
+  set template(int? value) => setScreenValue('template', value);
+  int? get ground => screenValue<int?>('ground');
+  set ground(int? value) => setScreenValue('ground', value);
+  int? get contract => screenValue<int?>('contract');
+  set contract(int? value) => setScreenValue('contract', value);
+  int? get owner => screenValue<int?>('owner');
+  set owner(int? value) => setScreenValue('owner', value);
+  String? get kind => screenValue<String?>('kind');
+  set kind(String? value) => setScreenValue('kind', value);
+  String? get deputy => screenValue<String?>('deputy');
+  set deputy(String? value) => setScreenValue('deputy', value);
+  String get ownerMode => screenValue<String>('ownerMode');
+  set ownerMode(String value) => setScreenValue('ownerMode', value);
+  String get sport => screenValue<String>('sport');
+  set sport(String value) => setScreenValue('sport', value);
+  Map<String, String> get approvers =>
+      screenValue<Map<String, String>>('approvers');
+  set approvers(Map<String, String> value) =>
+      setScreenValue('approvers', value);
+  List<String> get photos => screenValue<List<String>>('photos');
+  set photos(List<String> value) => setScreenValue('photos', value);
+  List<AdminRow> get assignments => screenValue<List<AdminRow>>('assignments');
+  set assignments(List<AdminRow> value) => setScreenValue('assignments', value);
+  bool get picking => screenValue<bool>('picking');
+  set picking(bool value) => setScreenValue('picking', value);
+  String? get localError => screenValue<String?>('localError');
+  set localError(String? value) => setScreenValue('localError', value);
+  String? get success => screenValue<String?>('success');
+  set success(String? value) => setScreenValue('success', value);
   TextEditingController control(String key) =>
-      inputs.putIfAbsent(key, () => TextEditingController());
+      inputs.putIfAbsent(key, () => screenTextController('input:$key'));
   @override
   void dispose() {
     for (final c in inputs.values) {
@@ -39,6 +93,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final mutation = ref.watch(adminMutationProvider(widget.staffId));
     final busy = mutation.isLoading || picking;
     return SingleChildScrollView(
@@ -81,7 +136,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                                       ),
                                     ),
                                 ],
-                                onChanged: (v) => setState(() {
+                                onChanged: (v) => updateScreen(() {
                                   template = v;
                                   kind = approvalKind(
                                     templates.firstWhere(
@@ -129,8 +184,9 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                                   'h_id',
                                   'h_name',
                                   approvers[position],
-                                  (v) =>
-                                      setState(() => approvers[position] = v!),
+                                  (v) => updateScreen(
+                                    () => approvers[position] = v!,
+                                  ),
                                 ),
                               ),
                           ],
@@ -159,7 +215,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                             'h_id',
                             'h_name',
                             deputy,
-                            (v) => setState(() => deputy = v),
+                            (v) => updateScreen(() => deputy = v),
                           ),
                         ),
                       ],
@@ -181,7 +237,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                             'g_code',
                             'g_name',
                             ground,
-                            (v) => setState(() => ground = v),
+                            (v) => updateScreen(() => ground = v),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -206,7 +262,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                             'c_seq',
                             'c_treaty',
                             contract,
-                            (v) => setState(() => contract = v),
+                            (v) => updateScreen(() => contract = v),
                           ),
                         ),
                       ],
@@ -290,7 +346,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
           cancelText: '취소',
         );
         if (d != null && mounted) {
-          setState(
+          updateScreen(
             () => control(key).text = d.toIso8601String().split('T').first,
           );
         }
@@ -360,7 +416,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
               ButtonSegment(value: '기존', label: Text('기존 소유주')),
             ],
             selected: {ownerMode},
-            onSelectionChanged: (v) => setState(() => ownerMode = v.first),
+            onSelectionChanged: (v) => updateScreen(() => ownerMode = v.first),
           ),
           const SizedBox(height: 12),
           if (ownerMode == '신규') ...[
@@ -376,7 +432,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                 'o_seq',
                 'o_name',
                 owner,
-                (v) => setState(() => owner = v),
+                (v) => updateScreen(() => owner = v),
               ),
             ),
         ],
@@ -396,12 +452,12 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
               for (final s in ['축구', '농구', '배구', '야구'])
                 DropdownMenuItem(value: s, child: Text(s)),
             ],
-            onChanged: (v) => setState(() => sport = v!),
+            onChanged: (v) => updateScreen(() => sport = v!),
           ),
           const SizedBox(height: 12),
-          _field('address', '전체 주소', max: 255),
-          _field('lat', '위도', max: 30),
-          _field('lng', '경도', max: 30),
+          // 수정 일 : 2026-10-30 / 작업자 : 양태건
+          // 지도로 선택한 주소·좌표를 기존 상신 JSON에 전달합니다.
+          GroundLocationPicker(staffId: widget.staffId),
           _field('capacity', '수용 인원', number: true),
           _field('price', '이용 금액 (원)', number: true),
           _field('time', '운영 시간 (예: 09:00~22:00)', max: 100),
@@ -424,7 +480,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
               trailing: IconButton(
                 tooltip: '첨부 제외',
                 icon: const Icon(Icons.close),
-                onPressed: () => setState(() => photos.remove(name)),
+                onPressed: () => updateScreen(() => photos.remove(name)),
               ),
             ),
           OutlinedButton.icon(
@@ -451,7 +507,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
               ),
               trailing: IconButton(
                 tooltip: '배정 제외',
-                onPressed: () => setState(() => assignments.removeAt(i)),
+                onPressed: () => updateScreen(() => assignments.removeAt(i)),
                 icon: const Icon(Icons.close),
               ),
             ),
@@ -467,7 +523,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
                         builder: (_) => _AssignmentDialog(managers: p.rows),
                       );
                       if (value != null && mounted) {
-                        setState(() => assignments.add(value));
+                        updateScreen(() => assignments.add(value));
                       }
                     },
               child: const Text('+ 근무 배정'),
@@ -478,7 +534,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
     ),
   ];
   Future<void> _photo() async {
-    setState(() => picking = true);
+    updateScreen(() => picking = true);
     try {
       final file = await openFile(
         acceptedTypeGroups: [
@@ -495,7 +551,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
       );
       if (file == null || !mounted) return;
       if (await file.length() > 10 * 1024 * 1024) {
-        if (mounted) setState(() => localError = '사진은 10MB 이하로 선택해 주세요.');
+        if (mounted) updateScreen(() => localError = '사진은 10MB 이하로 선택해 주세요.');
         return;
       }
       final bytes = await file.readAsBytes();
@@ -503,17 +559,19 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
       final name = await ref
           .read(adminMutationProvider(widget.staffId).notifier)
           .upload(file.name, bytes);
-      if (name != null && mounted) setState(() => photos.add(name));
+      if (name != null && mounted) updateScreen(() => photos.add(name));
     } catch (_) {
-      if (mounted) setState(() => localError = '사진을 선택하지 못했습니다. 다시 시도해 주세요.');
+      if (mounted) {
+        updateScreen(() => localError = '사진을 선택하지 못했습니다. 다시 시도해 주세요.');
+      }
     } finally {
-      if (mounted) setState(() => picking = false);
+      if (mounted) updateScreen(() => picking = false);
     }
   }
 
   Future<void> _submit() async {
     if (!form.currentState!.validate()) return;
-    setState(() {
+    updateScreen(() {
       localError = null;
       success = null;
     });
@@ -521,7 +579,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
     switch (kind) {
       case '휴가':
         if (control('end').text.compareTo(control('start').text) < 0) {
-          setState(() => localError = '종료일은 시작일 이후로 선택해 주세요.');
+          updateScreen(() => localError = '종료일은 시작일 이후로 선택해 주세요.');
           return;
         }
         data = {
@@ -538,8 +596,11 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
       case '해지':
         data = {'c_seq': contract};
       case '신규 계약':
-        final lat = double.tryParse(control('lat').text),
-            lng = double.tryParse(control('lng').text);
+        final location = ref
+            .read(groundLocationProvider(widget.staffId))
+            .asData
+            ?.value;
+        final lat = location?.latitude, lng = location?.longitude;
         if (lat == null ||
             !lat.isFinite ||
             lat.abs() > 90 ||
@@ -549,8 +610,9 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
             int.parse(control('capacity').text) < 1 ||
             photos.isEmpty ||
             assignments.isEmpty) {
-          setState(
-            () => localError = '좌표·수용 인원을 확인하고 사진과 근무 배정을 하나 이상 추가해 주세요.',
+          updateScreen(
+            () => localError =
+                '지도에서 구장 위치와 수용 인원을 확인하고 사진과 근무 배정을 하나 이상 추가해 주세요.',
           );
           return;
         }
@@ -565,7 +627,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
           },
           'g_name': control('groundName').text.trim(),
           'e_code': sport,
-          'g_address': control('address').text.trim(),
+          'g_address': location!.address,
           'g_lat': lat,
           'g_lng': lng,
           'g_num': int.parse(control('capacity').text),
@@ -581,7 +643,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
         return;
     }
     if (approvers.length != 3 || approvers.values.toSet().length != 3) {
-      setState(() => localError = '서로 다른 사원·팀장·임원 결재자를 선택해 주세요.');
+      updateScreen(() => localError = '서로 다른 사원·팀장·임원 결재자를 선택해 주세요.');
       return;
     }
     if (!await adminConfirm(context, '품의 상신', '작성한 품의서를 결재 요청할까요?')) return;
@@ -598,7 +660,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
           'data': data,
         });
     if (saved && mounted) {
-      setState(() {
+      updateScreen(() {
         success = '품의서를 상신했습니다. 품의 내역에서 확인해 주세요.';
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(success!)));
@@ -607,6 +669,7 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
         approvers.clear();
         photos.clear();
         assignments.clear();
+        ref.invalidate(groundLocationProvider(widget.staffId));
         for (final c in inputs.values) {
           c.clear();
         }
@@ -615,18 +678,37 @@ class _ApprovalWriterState extends ConsumerState<ApprovalWriter> {
   }
 }
 
-class _AssignmentDialog extends StatefulWidget {
+class _AssignmentDialog extends ConsumerStatefulWidget {
   const _AssignmentDialog({required this.managers});
   final List<AdminRow> managers;
   @override
-  State<_AssignmentDialog> createState() => _AssignmentDialogState();
+  ConsumerState<_AssignmentDialog> createState() => _AssignmentDialogState();
 }
 
-class _AssignmentDialogState extends State<_AssignmentDialog> {
-  String? manager;
-  String period = '오전';
-  final days = <String>{};
-  final start = TextEditingController(), end = TextEditingController();
+class _AssignmentDialogState extends ConsumerState<_AssignmentDialog>
+    with AsyncScreenState<_AssignmentDialog> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'manager': null,
+    'period': '오전',
+    'days': <String>{},
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+    'days': Set<String>.from(values['days'] as Set),
+  };
+
+  String? get manager => screenValue<String?>('manager');
+  set manager(String? value) => setScreenValue('manager', value);
+  String get period => screenValue<String>('period');
+  set period(String value) => setScreenValue('period', value);
+  Set<String> get days => screenValue<Set<String>>('days');
+  set days(Set<String> value) => setScreenValue('days', value);
+  late final start = screenTextController('start'),
+      end = screenTextController('end');
   final form = GlobalKey<FormState>();
   @override
   void dispose() {
@@ -636,93 +718,101 @@ class _AssignmentDialogState extends State<_AssignmentDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('매니저 근무 배정'),
-    content: SizedBox(
-      width: 480,
-      child: SingleChildScrollView(
-        child: Form(
-          key: form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: '매니저'),
-                items: [
-                  for (final r in widget.managers)
-                    DropdownMenuItem(
-                      value: '${r['m_id']}',
-                      child: Text('${r['m_name']} · ${r['m_id']}'),
-                    ),
-                ],
-                onChanged: (v) => setState(() => manager = v),
-                validator: (v) => v == null ? '매니저를 선택해 주세요.' : null,
-              ),
-              Wrap(
-                children: [
-                  for (final d in '월화수목금토일'.split(''))
-                    FilterChip(
-                      label: Text(d),
-                      selected: days.contains(d),
-                      onSelected: (s) =>
-                          setState(() => s ? days.add(d) : days.remove(d)),
-                    ),
-                ],
-              ),
-              DropdownButton<String>(
-                value: period,
-                items: [
-                  for (final p in ['오전', '오후'])
-                    DropdownMenuItem(value: p, child: Text(p)),
-                ],
-                onChanged: (v) => setState(() => period = v!),
-              ),
-              TextFormField(
-                controller: start,
-                decoration: const InputDecoration(labelText: '시작 시간 (09:00)'),
-                validator: (v) =>
-                    RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(v ?? '')
-                    ? null
-                    : 'HH:mm 형식으로 입력해 주세요.',
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: end,
-                decoration: const InputDecoration(labelText: '종료 시간 (12:00)'),
-                validator: (v) =>
-                    RegExp(r'^(([01]\d|2[0-3]):[0-5]\d|24:00)$')
-                        .hasMatch(v ?? '')
-                    ? null
-                    : 'HH:mm 형식으로 입력해 주세요.',
-              ),
-              const SizedBox(height: 12),
-              const Text('근무 중복과 운영 시간은 상신 시 서버에서 검증합니다.'),
-            ],
+  Widget build(BuildContext context) {
+    watchScreen();
+    return AlertDialog(
+      title: const Text('매니저 근무 배정'),
+      content: SizedBox(
+        width: 480,
+        child: SingleChildScrollView(
+          child: Form(
+            key: form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '매니저'),
+                  items: [
+                    for (final r in widget.managers)
+                      DropdownMenuItem(
+                        value: '${r['m_id']}',
+                        child: Text('${r['m_name']} · ${r['m_id']}'),
+                      ),
+                  ],
+                  onChanged: (v) => updateScreen(() => manager = v),
+                  validator: (v) => v == null ? '매니저를 선택해 주세요.' : null,
+                ),
+                Wrap(
+                  children: [
+                    for (final d in '월화수목금토일'.split(''))
+                      FilterChip(
+                        label: Text(d),
+                        selected: days.contains(d),
+                        onSelected: (s) => updateScreen(
+                          () => s ? days.add(d) : days.remove(d),
+                        ),
+                      ),
+                  ],
+                ),
+                DropdownButton<String>(
+                  value: period,
+                  items: [
+                    for (final p in ['오전', '오후'])
+                      DropdownMenuItem(value: p, child: Text(p)),
+                  ],
+                  onChanged: (v) => updateScreen(() => period = v!),
+                ),
+                TextFormField(
+                  controller: start,
+                  decoration: const InputDecoration(labelText: '시작 시간 (09:00)'),
+                  validator: (v) =>
+                      RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(v ?? '')
+                      ? null
+                      : 'HH:mm 형식으로 입력해 주세요.',
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: end,
+                  decoration: const InputDecoration(labelText: '종료 시간 (12:00)'),
+                  validator: (v) =>
+                      RegExp(r'^(([01]\d|2[0-3]):[0-5]\d|24:00)$')
+                          .hasMatch(v ?? '')
+                      ? null
+                      : 'HH:mm 형식으로 입력해 주세요.',
+                ),
+                const SizedBox(height: 12),
+                const Text('근무 중복과 운영 시간은 상신 시 서버에서 검증합니다.'),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('취소'),
-      ),
-      FilledButton(
-        onPressed: () {
-          if (form.currentState!.validate() && days.isNotEmpty) {
-            Navigator.pop(context, {
-              'm_id': manager,
-              'a_day': days.toList(),
-              'a_period': period,
-              'a_start': start.text,
-              'a_end': end.text,
-            });
-          }
-        },
-        child: const Text('배정 추가'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (form.currentState!.validate() && days.isNotEmpty) {
+              Navigator.pop(context, {
+                'm_id': manager,
+                'a_day': days.toList(),
+                'a_period': period,
+                'a_start': start.text,
+                'a_end': end.text,
+              });
+            }
+          },
+          child: const Text('배정 추가'),
+        ),
+      ],
+    );
+  }
 }
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

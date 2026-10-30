@@ -12,11 +12,12 @@ import 'package:bootcamp_project_gongin_admin_app/model/login_role.dart';
 import 'package:bootcamp_project_gongin_admin_app/service/operations_api.dart';
 import 'package:bootcamp_project_gongin_admin_app/view/dashboard/dashboard_page.dart';
 import 'package:bootcamp_project_gongin_admin_app/view/match/match_page.dart';
+import 'package:bootcamp_project_gongin_admin_app/view/match/manager_result_panel.dart';
 
 class DashboardLogin extends LoginNotifier {
   @override
-  AsyncValue<StaffSession?> build() =>
-      const AsyncData(StaffSession(userId: 'test', role: LoginRole.manager));
+  StaffSession? build() =>
+      const StaffSession(userId: 'test', role: LoginRole.manager);
 }
 
 String get testMatchDate => DateTime.now()
@@ -307,6 +308,14 @@ void main() {
     await tester.ensureVisible(find.text('경기 시작'));
     await tester.tap(find.text('경기 시작'));
     await tester.pumpAndSettle();
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 경기 기록은 상세 패널 너비가 아닌 전체 화면을 사용해야 합니다.
+    final live = find.byKey(const ValueKey('fullscreen-match-live'));
+    expect(live, findsOneWidget);
+    expect(
+      tester.getSize(live).width,
+      tester.view.physicalSize.width / tester.view.devicePixelRatio,
+    );
     await tester.tap(find.text('선수1'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '골'));
@@ -341,7 +350,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '경기 종료').last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('결과 등록'));
+    await tester.scrollUntilVisible(
+      find.text('결과 등록'),
+      250,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey("match-review-scroll")),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('결과 등록'));
     await tester.pumpAndSettle();
@@ -351,7 +369,13 @@ void main() {
     expect(find.text('공IN · 실력매칭'), findsOneWidget);
     await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
-    expect(find.text('경기 결과'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ManagerResultDetails),
+        matching: find.text('경기 결과'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('1 : 0'), findsOneWidget);
   });
   testWidgets('기존 결과는 지난 매치에서 원문으로 조회하고 재등록하지 않는다', (tester) async {
@@ -362,7 +386,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(ListTile, '테스트 구장'));
     await tester.pumpAndSettle();
-    expect(find.text('경기 결과'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(ManagerResultDetails),
+        matching: find.text('경기 결과'),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('기존 회원'), findsOneWidget);
     expect(find.text('원본 스코어: 5'), findsOneWidget);
     expect(find.textContaining('기록 원문: 100'), findsOneWidget);
@@ -411,3 +441,5 @@ void main() {
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

@@ -23,14 +23,26 @@ class MatchUpdatesService {
   Future<List<CancelledMatch>> cancellations({
     String? managerId,
     int? reason,
+    String? kind,
+    String? sport,
   }) async {
     final path = managerId == null
         ? '/match/cancel'
         : '/match/manage/cancel/${Uri.encodeComponent(managerId)}';
     final data = await api.request(
-      adminPath(path, {'r_c_category': reason?.toString()}),
+      adminPath(path, {
+        'r_c_category': reason?.toString(),
+        'kind': kind,
+        'e_code': sport == 'all' ? null : sport,
+      }),
     );
-    return adminRows(data['results'])
+    final rows = adminRows(data['results']);
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 구버전 응답이나 다른 유형을 정상 내역으로 섞어 표시하지 않습니다.
+    if (kind != null && rows.any((row) => row['kind'] != kind)) {
+      throw const OperationsApiException(502, '취소 유형을 확인할 수 없습니다. 다시 조회해 주세요.');
+    }
+    return rows
         .map(CancelledMatch.fromJson)
         .where((r) => cancellationReasons.containsKey(r.reason))
         .toList();
@@ -48,6 +60,7 @@ class MatchUpdatesService {
     required String date,
     required String start,
     required int reason,
+    int? teamCode,
   }) async {
     final result = await api.patch(
       '/match/manage/cancel/${Uri.encodeComponent(managerId)}',
@@ -56,6 +69,7 @@ class MatchUpdatesService {
         'r_date': date,
         'rs_time': start,
         'r_c_category': reason,
+        'team_code': ?teamCode,
       },
     );
     if (result['result'] != 'OK') {
@@ -67,3 +81,5 @@ class MatchUpdatesService {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

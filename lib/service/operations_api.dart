@@ -1,3 +1,4 @@
+import 'dart:async';
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 import 'dart:convert';
 
@@ -17,9 +18,9 @@ final operationsApiProvider = Provider((ref) {
     accessToken: ref.watch(loginProvider).asData?.value?.accessToken,
   );
 });
-final operationsDataProvider = FutureProvider.autoDispose
-    .family<Map<String, dynamic>, String>(
-      (ref, path) => ref.watch(operationsApiProvider).request(path),
+final operationsDataProvider = AsyncNotifierProvider.autoDispose
+    .family<OperationsDataNotifier, Map<String, dynamic>, String>(
+      OperationsDataNotifier.new,
       retry: (_, _) => null,
     );
 
@@ -195,3 +196,15 @@ class OperationsApiException implements Exception {
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class OperationsDataNotifier extends AsyncNotifier<Map<String, dynamic>> {
+  OperationsDataNotifier(this.path);
+  final String path;
+  @override
+  FutureOr<Map<String, dynamic>> build() =>
+      ref.watch(operationsApiProvider).request(path);
+}
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

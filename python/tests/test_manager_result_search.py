@@ -60,6 +60,16 @@ class ResultSearchTests(unittest.TestCase):
         self.assertEqual(rows[0]['team_summary'][0]['result'], '승')
         self.assertIsNone(rows[0]['team_summary'][0]['rating_change'])
 
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    def test_published_absence_penalty_is_visible_without_affecting_score(self):
+        absent = member(cid='absent')
+        absent.update(c_r_r_score=None, c_r_r_attendance=0,
+                      c_r_r_rating_before=1500, c_r_r_rating_after=1470)
+        result = target.group_results([member(), absent], [], 'manager')[0]
+        self.assertEqual(result['home_score'], 4)
+        self.assertEqual(result['sides'][-1]['members'][0]['rating_change'], -30)
+        self.assertEqual(target.group_results([absent], [], 'manager'), [])
+
     def test_attendance_without_score_is_not_a_result(self):
         row = member()
         row['c_r_r_score'] = None

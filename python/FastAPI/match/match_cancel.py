@@ -3,7 +3,7 @@
 
 # 본사 구장 취소 내역 조회 API (router prefix로 실제 주소 앞에 /match 가 붙음)
 #   GET /match/cancel                                       매니저가 취소한 경기 목록 (취소 사유 포함)
-#       ?r_c_category=1 정원 미달 / 2 우천·기상악화 / 3 노쇼 및 환불 (안 보내면 전체)
+#       ?r_c_category=1 시설 문제 / 2 우천·기상악화 / 3 노쇼 및 환불 (안 보내면 전체)
 #       ?g_code=1 특정 구장만 조회 (안 보내면 전체 구장)
 #   GET /match/cancel/{g_code}?r_date=날짜&rs_time=08:00    취소된 경기 1건의 예약 회원 목록
 # 조회만 하고 받는 값(body)이 없어서 BaseModel class 없음
@@ -14,7 +14,7 @@
 # 중간 수정 작성자 - 신현진
 # 수정일 2026.10.28
 # reservation.r_c_category : 예약 취소 사유 (VARCHAR, 회원 앱과 같은 컬럼을 함께 사용)
-#   '1' = 정원 미달 / '2' = 우천·기상악화 / '3' = 노쇼 및 환불 → 매니저가 취소할 때 저장
+#   '1' = 시설 문제 / '2' = 우천·기상악화 / '3' = 노쇼 및 환불 → 매니저가 취소할 때 저장
 #   그 외 (회원이 직접 쓴 글) = 회원 직접 취소 → 구장 취소가 아니므로 이 API에서는 제외
 #     ('0' ~ '3'은 회원 앱에서 입력을 막아 둠, 사유 이름은 "회원 개인 사정"으로 표시하고 원문은 보내지 않음)
 import logging
@@ -37,7 +37,7 @@ CATEGORY_CANCELED = 2   # 취소
 # 예약 취소 사유 이름 (DB의 r_c_category 값 → 앱에 표시할 이름)
 # r_c_category가 VARCHAR라서 '1' 같은 글자 키로 찾음 (숫자 키로 찾으면 전부 "회원 개인 사정"으로 나옴)
 CANCEL_CATEGORY_NAMES = {
-    "1": "정원 미달",
+    "1": "시설 문제",
     "2": "우천·기상악화",
     "3": "노쇼 및 환불",
 }
@@ -116,7 +116,7 @@ CANCEL_MATCH_GROUP_BY = """
 @router.get("/cancel")
 def select_canceled_matches(
     # ge=1, le=3 : 1~3 밖의 값이 오면 FastAPI가 자동으로 422 에러 처리
-    r_c_category: int | None = Query(None, ge=1, le=3, description="1 정원 미달 / 2 우천·기상악화 / 3 노쇼 및 환불"),
+    r_c_category: int | None = Query(None, ge=1, le=3, description="1 시설 문제 / 2 우천·기상악화 / 3 노쇼 및 환불"),
     g_code: str | None = Query(None, description="구장코드 (안 보내면 전체 구장)"),
 ):
     connection = None
@@ -232,3 +232,5 @@ def select_canceled_match_detail(
             connection.close()
 
 # 최종 수정 일 : 2026-10-28
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

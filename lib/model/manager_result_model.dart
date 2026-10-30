@@ -29,6 +29,15 @@ String signedRating(Object? value) {
   return number == null ? '변동 기록 없음' : '${number > 0 ? '+' : ''}$number';
 }
 
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 날짜만 비교하며 UTC 응답은 한국 경기일로 변환합니다. 없는 날짜를 만들지 않습니다.
+String? managerGameDate(Object? value) {
+  final parsed = value is DateTime ? value : DateTime.tryParse('$value');
+  if (parsed == null) return null;
+  final day = parsed.isUtc ? parsed.add(const Duration(hours: 9)) : parsed;
+  return '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+}
+
 class ManagerResult {
   ManagerResult.fromJson(this.data);
   final AdminRow data;
@@ -72,3 +81,5 @@ class ManagerRatingRules {
   }
 }
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

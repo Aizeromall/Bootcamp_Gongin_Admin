@@ -19,12 +19,10 @@ class BannerLogin extends LoginNotifier {
   BannerLogin(this.department);
   final String department;
   @override
-  AsyncValue<StaffSession?> build() => AsyncData(
-    StaffSession(
-      userId: 'staff',
-      role: LoginRole.headquarters,
-      department: department,
-    ),
+  StaffSession? build() => StaffSession(
+    userId: 'staff',
+    role: LoginRole.headquarters,
+    department: department,
   );
 }
 
@@ -174,3 +172,5 @@ void main() {
   });
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

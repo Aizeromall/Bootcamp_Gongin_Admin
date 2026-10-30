@@ -11,6 +11,8 @@ import 'package:bootcamp_project_gongin_admin_app/view/match/manager_schedule_pa
 import 'package:bootcamp_project_gongin_admin_app/vm/login_notifier.dart';
 import 'package:bootcamp_project_gongin_admin_app/vm/manager_result_notifier.dart';
 
+import 'package:bootcamp_project_gongin_admin_app/vm/manager_schedule_notifier.dart';
+
 import 'manager_schedule_test.dart' show ScheduleLogin, jsonResponse;
 
 Map<String, dynamic> resultRow(String code) => {
@@ -182,13 +184,20 @@ void main() {
     );
     expect(calls, 0);
   });
-  testWidgets('내 매치는 오늘 이후 전체 예정 경기를 받고 종목별로 분리한다', (tester) async {
+  testWidgets('내 매치는 전체 조회 없이 선택 날짜의 경기만 종목별로 표시한다', (tester) async {
     var calls = 0;
     final client = MockClient((request) async {
-      expect(request.url.path, '/match/manager/upcoming');
+      if (request.url.path.startsWith('/match/schedule/')) {
+        return jsonResponse({
+          'm_id': 'manager1',
+          'r_date': request.url.queryParameters['r_date'],
+          'grounds': [],
+        });
+      }
+      expect(request.url.path, '/match/operations');
       calls++;
       return jsonResponse({
-        'operations': [
+        'results': [
           {
             'r_seq': 1,
             'g_code': 1,
@@ -202,7 +211,7 @@ void main() {
             'r_seq': 2,
             'g_code': 2,
             'g_name': '다음날 야구장',
-            'r_date': '2030-01-03',
+            'r_date': '2030-01-02',
             'rs_time': '18:00',
             'e_code': 'BASEBALL',
             'status': 'attendance',
@@ -215,22 +224,22 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          managerTodayProvider.overrideWithBuild(
+            (ref, notifier) => DateTime(2030, 1, 2),
+          ),
           loginProvider.overrideWith(ScheduleLogin.new),
           operationsApiProvider.overrideWithValue(
             OperationsApi(client: client),
           ),
         ],
         child: const MaterialApp(
-          home: Scaffold(
-            body: ManagerSchedulePanel(
-              managerId: 'manager1',
-              showAllUpcoming: true,
-            ),
-          ),
+          home: Scaffold(body: ManagerSchedulePanel(managerId: 'manager1')),
         ),
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text('오늘 이후 전체'), findsNothing);
+    expect(find.text('2030-01-02'), findsOneWidget);
     expect(find.text('내일 축구장'), findsOneWidget);
     expect(find.text('다음날 야구장'), findsOneWidget);
     await tester.drag(

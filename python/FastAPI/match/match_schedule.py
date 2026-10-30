@@ -172,14 +172,14 @@ def slot_to_dict(rs_time: str, g_num, pickups: list, rental: Optional[dict], tea
             "reservation_count": len(pickups),               # 예약 인원
             "g_num": g_num,                                  # 구장 정원
             # r_check : 정원이 차서 매치가 성사됐는지 (회원 앱에서 정원이 차면 같은 시간대 전체를 1로 바꿈)
-            "is_full": any(bool(row["r_check"]) for row in pickups),
+            "is_full": any(str(row["r_check"]).strip() == "1" for row in pickups),
         } if pickups else None,
         # 구장대여 (대여가 없으면 None)
         "rental": {
             "r_seq": rental["r_seq"],                        # 구장대여 예약번호
             "c_id_seq": rental["c_id_seq"],                  # 대여한 회원 (팀장)
             "c_name": rental["c_name"],                      # 대여한 회원 이름
-            "is_matched": bool(rental["r_check"]),           # 팀 매칭 성사 여부
+            "is_matched": str(rental["r_check"]).strip() == "1",           # 팀 매칭 성사 여부
         } if rental else None,
         # 팀 대 팀 매칭 (성사된 매칭이 없으면 None, 자세한 정보는 /match/team_match/{team_code})
         "team_match": team_match,
@@ -308,14 +308,18 @@ def select_manager_schedule(
         rentals_by_slot = {}  # {(구장코드, 시작 시간): 구장대여 예약 1건}
         for row in reservations:
             key = (row["g_code"], format_time(row["rs_time"]))
-            if row["reservation_category"] == RESERVATION_RENTAL:
-                rentals_by_slot.setdefault(key, row)  # 시간대마다 대여는 1건 (먼저 저장된 예약 사용)
-            else:
+            # 수정 일 : 2026-10-30 / 작업자 : 양태건
+            # 실제 VARCHAR의 '1'/'2'와 정수 응답을 모두 처리합니다.
+            # 문자열 '2'를 실력매칭으로 잘못 분류하면 성사 팀매칭이 목록에서 사라집니다.
+            category = str(row["reservation_category"]).strip()
+            if category == str(RESERVATION_RENTAL):
+                rentals_by_slot.setdefault(key, row)
+            elif category == str(RESERVATION_PICKUP):
                 pickups_by_slot.setdefault(key, []).append(row)
 
         # 구장대여 예약 → 성사된 팀 매치 연결 (위 [팀 대 팀 매칭 찾기])
         def find_team_match(rental: Optional[dict], rs_time: str) -> Optional[dict]:
-            if rental is None:
+            if rental is None or str(rental["r_check"]).strip() != "1":
                 return None
             for match in team_matches:
                 same_time = format_time(match["team_start"].time()) == rs_time if match["team_start"] else False
@@ -368,3 +372,5 @@ def select_manager_schedule(
             connection.close()  # 성공/실패 상관없이 DB 연결 종료
 
 # 최종 수정 일 : 2026-10-28
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

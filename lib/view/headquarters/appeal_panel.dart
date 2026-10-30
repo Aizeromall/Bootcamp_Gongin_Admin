@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 제재 조회와 이의신청 재심의 시작까지만 기존 API의 허용 동작을 연결합니다.
 import 'package:flutter/material.dart';
@@ -16,12 +18,33 @@ class AppealPanel extends ConsumerStatefulWidget {
   ConsumerState<AppealPanel> createState() => _AppealPanelState();
 }
 
-class _AppealPanelState extends ConsumerState<AppealPanel> {
-  bool sanctions = false;
-  String? state, sport;
-  int? selected;
+class _AppealPanelState extends ConsumerState<AppealPanel>
+    with AsyncScreenState<AppealPanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'sanctions': false,
+    'state': null,
+    'sport': null,
+    'selected': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  bool get sanctions => screenValue<bool>('sanctions');
+  set sanctions(bool value) => setScreenValue('sanctions', value);
+  String? get state => screenValue<String?>('state');
+  set state(String? value) => setScreenValue('state', value);
+  String? get sport => screenValue<String?>('sport');
+  set sport(String? value) => setScreenValue('sport', value);
+  int? get selected => screenValue<int?>('selected');
+  set selected(int? value) => setScreenValue('selected', value);
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final mutation = ref.watch(adminMutationProvider(widget.staffId));
     final path = adminPath(sanctions ? '/appeal/sanction' : '/appeal/list', {
       'sport': sport,
@@ -42,7 +65,7 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
                   ButtonSegment(value: true, label: Text('제재 목록')),
                 ],
                 selected: {sanctions},
-                onSelectionChanged: (v) => setState(() {
+                onSelectionChanged: (v) => updateScreen(() {
                   sanctions = v.first;
                   state = null;
                   selected = null;
@@ -65,7 +88,7 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
                   ])
                     DropdownMenuItem(value: v, child: Text(v)),
                 ],
-                onChanged: (v) => setState(() {
+                onChanged: (v) => updateScreen(() {
                   state = v == '전체 상태' ? null : v;
                   selected = null;
                 }),
@@ -83,7 +106,7 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
                   }.entries)
                     DropdownMenuItem(value: e.key, child: Text(e.value)),
                 ],
-                onChanged: (v) => setState(() {
+                onChanged: (v) => updateScreen(() {
                   sport = v == '전체' ? null : v;
                   selected = null;
                 }),
@@ -94,7 +117,7 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
         Expanded(
           child: AdminSplitView(
             selected: selected != null && !sanctions,
-            onBack: () => setState(() => selected = null),
+            onBack: () => updateScreen(() => selected = null),
             list: AdminData(
               staffId: widget.staffId,
               path: path,
@@ -110,7 +133,7 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
                     InkWell(
                       onTap: () => sanctions
                           ? _showSanction(context, r)
-                          : setState(() => selected = adminInt(r['a_seq'])),
+                          : updateScreen(() => selected = adminInt(r['a_seq'])),
                       child: AdminCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,7 +172,8 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
                           Align(
                             alignment: Alignment.centerLeft,
                             child: TextButton.icon(
-                              onPressed: () => setState(() => selected = null),
+                              onPressed: () =>
+                                  updateScreen(() => selected = null),
                               icon: const Icon(Icons.arrow_back),
                               label: const Text('이의신청 목록으로'),
                             ),
@@ -257,3 +281,5 @@ class _AppealPanelState extends ConsumerState<AppealPanel> {
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

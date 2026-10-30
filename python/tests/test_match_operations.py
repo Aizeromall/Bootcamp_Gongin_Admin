@@ -82,6 +82,25 @@ class MatchRulesTest(unittest.TestCase):
         self.call("attendance", r_seq=1, attendance=False)
         self.assertFalse(self.state["attendance"]["1"])
 
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    def test_attendance_threshold_boundary_and_direct_start(self):
+        for total, present, allowed in [(10, 7, True), (10, 6, False),
+                                        (12, 8, False), (12, 9, True), (0, 0, False)]:
+            with self.subTest(total=total, present=present):
+                state = initial_state([dict(self.players[0], r_seq=i, c_id_seq=f'm{i}')
+                                       for i in range(total)])
+                state['attendance'] = {str(i): i < present for i in range(total)}
+                if allowed:
+                    operations.require_start_attendance(state)
+                else:
+                    with self.assertRaises(HTTPException) as caught:
+                        operations.require_start_attendance(state)
+                    self.assertEqual(caught.exception.status_code, 409)
+        self.state['attendance'] = {'1': True, '2': False}
+        with self.assertRaises(HTTPException):
+            self.call('teams')
+        self.assertEqual(self.record['status'], 'attendance')
+
     def test_start_requires_all_attendees_assigned(self):
         self.state["attendance"] = {"1": True, "2": True}
         self.call("teams", assignments={"1": "A"})
@@ -90,7 +109,8 @@ class MatchRulesTest(unittest.TestCase):
 
     def test_absent_player_cannot_be_assigned(self):
         self.state["attendance"] = {"1": True, "2": False}
-        self.call("teams", assignments={"1": "A", "2": "B"})
+        self.record["status"] = "teams"
+        self.state["assignments"] = {"1": "A", "2": "B"}
         with self.assertRaises(HTTPException):
             self.call("start")
 
@@ -263,12 +283,70 @@ class MatchRulesTest(unittest.TestCase):
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
 # [추가 시작] 기존 결과는 상세 조회만 허용하고 새 진행 상태를 생성하지 않습니다.
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+class ConfirmedPickupTest(unittest.TestCase):
+    def rows(self):
+        return [dict(r_seq=i, c_id_seq=f'member{i}', g_num=2, r_date='2026-10-30',
+                     reservation_category=1, r_category='1', r_c_category='', r_check=1)
+                for i in (1, 2)]
+
+    def test_only_full_confirmed_valid_today_or_future_match_is_eligible(self):
+        from datetime import date
+        today = date(2026, 10, 30)
+        rows = self.rows()
+        self.assertTrue(operations.confirmed_pickup(rows, today))
+        self.assertFalse(operations.confirmed_pickup(rows[:1], today))
+        self.assertFalse(operations.confirmed_pickup([rows[0], rows[0]], today))
+        for field, value in [('r_check', 0), ('r_c_category', '회원 취소'),
+                             ('r_category', '2'), ('reservation_category', 2),
+                             ('r_date', '2026-10-29'), ('g_num', 0)]:
+            with self.subTest(field=field):
+                changed = self.rows()
+                for row in changed:
+                    row[field] = value
+                self.assertFalse(operations.confirmed_pickup(changed, today))
+
+    def test_list_excludes_unconfirmed_and_underfilled_matches(self):
+        for confirmed, capacity, expected in [(1, 2, 1), (0, 2, 0), (1, 3, 0)]:
+            with self.subTest(confirmed=confirmed, capacity=capacity):
+                rows = [dict(row, r_date='2099-01-01', match_code='1_20990101_160000',
+                             g_code=1, g_name='구장', rs_time='16:00:00',
+                             c_prefer_stock='1', r_check=confirmed, g_num=capacity)
+                        for row in self.rows()]
+                conn = MagicMock()
+                cursor = conn.cursor.return_value.__enter__.return_value
+                cursor.fetchall.return_value = rows
+                with patch.object(operations, 'connect', return_value=conn), \
+                     patch.object(operations, 'assignments_for', return_value=[]), \
+                     patch.object(operations, 'schedule_matches', return_value=True), \
+                     patch.object(operations, 'legacy_results', return_value=[]), \
+                     patch.dict(operations._MATCHES, {}, clear=True):
+                    result = operations.match_list('manager')
+                self.assertEqual(len(result['results']), expected)
+                conn.commit.assert_not_called()
+
+    def test_direct_detail_rejects_unconfirmed_match_before_loading_state(self):
+        row = dict(self.rows()[0], match_code='1_20261030_160000', g_code=1,
+                   g_name='구장', rs_time='16:00:00', r_check=0)
+        cursor = MagicMock()
+        cursor.fetchone.return_value = row
+        cursor.fetchall.side_effect = [[row], []]
+        with patch.object(operations, 'assignments_for', return_value=[]), \
+             patch.object(operations, 'schedule_matches', return_value=True):
+            with self.assertRaises(HTTPException) as caught:
+                operations.load_match(cursor, 1, 'manager')
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertFalse(any(call.args[0].lstrip().startswith(('INSERT', 'UPDATE'))
+                             for call in cursor.execute.call_args_list))
+
+
 class LegacyResultTest(unittest.TestCase):
     def setUp(self):
         self.cursor = MagicMock()
         self.row = dict(
             r_seq=1,
             match_code="1_20261026_160000",
+            reservation_category=1, r_check=1, r_category="1", r_c_category="",
             g_code=1,
             g_name="테스트 구장",
             r_date="2026-10-26",
@@ -378,3 +456,5 @@ class TransactionTest(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 # [추가 끝]
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 계정별 배너 상태와 중복 저장 방지. 실제 권한은 서버가 최종 검증합니다.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,9 +13,9 @@ import 'login_notifier.dart';
 final bannerServiceProvider = Provider(
   (ref) => BannerService(ref.watch(operationsApiProvider)),
 );
-final bannerListProvider = FutureProvider.autoDispose
-    .family<List<BannerImage>, String>(
-      (ref, staffId) => ref.watch(bannerServiceProvider).list(),
+final bannerListProvider = AsyncNotifierProvider.autoDispose
+    .family<BannerListNotifier, List<BannerImage>, String>(
+      BannerListNotifier.new,
       retry: (_, _) => null,
     );
 final bannerMutationProvider = AsyncNotifierProvider.autoDispose
@@ -77,3 +79,15 @@ class BannerMutation extends AsyncNotifier<void> {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class BannerListNotifier extends AsyncNotifier<List<BannerImage>> {
+  BannerListNotifier(this.staffId);
+  final String staffId;
+  @override
+  FutureOr<List<BannerImage>> build() =>
+      ref.watch(bannerServiceProvider).list();
+}
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

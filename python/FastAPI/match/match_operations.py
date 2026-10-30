@@ -9,7 +9,8 @@ from functools import wraps
 from threading import RLock
 import re
 import time
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Literal
 
 import pymysql
@@ -104,6 +105,10 @@ SCORE_RULES = {
 
 # 경기 종목코드 (참가 회원의 c_prefer_stock이 모두 같아야 함, 섞여 있거나 모르면 None)
 def sport_code(state):
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    # 팀매칭은 실제 팀 종목을 유지하며 예약 명단이 비어도 축구로 잘못 표시하지 않습니다.
+    if state.get("fixed_sport") in STAT_KEYS:
+        return state["fixed_sport"]
     numbers = {str(p.get("c_prefer_stock")) for p in state["players"]}
     if len(numbers) != 1:
         return None
@@ -135,7 +140,8 @@ def team_points(e_code, own_stats, opponent_stats):
 
 # [수정 끝]
 ROSTER_SQL = """
- SELECT r.r_seq, r.c_id_seq, r.g_code, r.r_date,
+ SELECT r.r_seq, r.c_id_seq, r.g_code, r.r_date, r.r_check,
+        r.reservation_category, r.r_category, r.r_c_category,
         TIME_FORMAT(r.rs_time, '%%H:%%i:%%s') AS rs_time,
         TIME_FORMAT(r.re_time, '%%H:%%i:%%s') AS re_time,
         g.g_name, g.g_num, c.c_name, c.c_position, c.c_rating, c.c_prefer_stock,
@@ -144,6 +150,27 @@ ROSTER_SQL = """
  FROM reservation r JOIN ground g ON g.g_code = r.g_code
  JOIN customer c ON c.c_id_seq = r.c_id_seq
 """
+
+
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 조회·직접 접근·경기 명령에 동일한 유효 예약/성사 기준을 사용합니다.
+def valid_pickup_reservation(row):
+    return (str(row.get("reservation_category", "")).strip() == "1"
+            and str(row.get("r_category") or "").strip() != "2"
+            and str(row.get("r_c_category") or "").strip() in ("", "0"))
+
+
+def confirmed_pickup(rows, today=None):
+    if not rows or any(not valid_pickup_reservation(row) for row in rows):
+        return False
+    today = today or datetime.now(ZoneInfo("Asia/Seoul")).date()
+    try:
+        capacity = int(rows[0].get("g_num") or 0)
+        return (str(rows[0]["r_date"]) >= today.isoformat() and capacity > 0
+                and len({row["c_id_seq"] for row in rows}) >= capacity
+                and all(str(row.get("r_check")).strip() == "1" for row in rows))
+    except (TypeError, ValueError, KeyError):
+        return False
 
 
 # 작업자 : 양태건
@@ -525,13 +552,17 @@ def load_match(cursor, anchor, manager_id, *, lock=False):
     row = cursor.fetchone()
     if row is None:
         raise HTTPException(404, "경기를 찾을 수 없습니다.")
+    if not valid_pickup_reservation(row):
+        raise HTTPException(409, "취소되지 않은 실력매칭 예약만 진행할 수 있습니다.")
     code = row["match_code"]
     cursor.execute(
         ROSTER_SQL
         + " WHERE r.g_code=%s AND r.r_date=%s AND r.rs_time=%s ORDER BY r.r_seq",
         (row["g_code"], row["r_date"], row["rs_time"]),
     )
-    rows = cursor.fetchall()
+    rows = [item for item in cursor.fetchall() if valid_pickup_reservation(item)]
+    if not rows:
+        raise HTTPException(409, "유효한 실력매칭 예약이 없습니다.")
     record = dict(
         match_code=code,
         anchor_r_seq=rows[0]["r_seq"],
@@ -560,6 +591,8 @@ def load_match(cursor, anchor, manager_id, *, lock=False):
         return record, state
     if not schedule_matches(row, assignments_for(cursor, manager_id)):
         raise HTTPException(403, "배정된 요일·시간의 경기만 진행할 수 있습니다.")
+    if not confirmed_pickup(rows):
+        raise HTTPException(409, "오늘 이후 정원이 충족되고 성사된 실력매칭만 진행할 수 있습니다.")
     if cached:
         if cached[0]["m_id"] != manager_id:
             raise HTTPException(403, "다른 매니저가 진행하는 경기입니다.")
@@ -619,6 +652,16 @@ def write_attendance(cursor, record, player, present):
         )
 
 
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 반올림한 표시 비율 대신 정수 비교로 정확히 70% 이상인지 검증합니다.
+def require_start_attendance(state):
+    total = len(state["players"])
+    present = sum(state["attendance"].get(str(p["r_seq"])) is True for p in state["players"])
+    if total == 0 or present * 100 < total * 70:
+        required = (total * 70 + 99) // 100
+        raise HTTPException(409, f"출석률 70% 이상일 때 시작할 수 있습니다. 출석 {present}/{total}명, 최소 {required}명 필요")
+
+
 def mutate(cursor, record, state, command):
     # 작업자 : 양태건
     # 수정일 : 2026-10-26
@@ -655,6 +698,7 @@ def mutate(cursor, record, state, command):
             raise HTTPException(409, "참가 회원의 종목을 확인할 수 없거나 종목이 섞여 있습니다.")
         if any(str(p["r_seq"]) not in state["attendance"] for p in state["players"]):
             raise HTTPException(409, "모든 예약자의 출석 또는 결석을 확인해 주세요.")
+        require_start_attendance(state)
         state.update(
             assignments=command.assignments,
             team_names=command.team_names,
@@ -662,6 +706,7 @@ def mutate(cursor, record, state, command):
         )
         record["status"] = "teams"
     elif action == "start":
+        require_start_attendance(state)
         present = {
             str(p["r_seq"])
             for p in state["players"]
@@ -881,7 +926,10 @@ def match_list(manager_id: str = Depends(require_manager)):
                 + " WHERE EXISTS (SELECT 1 FROM assign a WHERE a.g_code=r.g_code AND a.m_id=%s) OR EXISTS (SELECT 1 FROM c_result_record old WHERE old.m_id=%s AND old.c_r_r_score IS NOT NULL AND old.c_r_r_code=CONCAT(r.g_code, '_', DATE_FORMAT(r.r_date, '%%Y%%m%%d'), '_', TIME_FORMAT(r.rs_time, '%%H%%i%%s'))) ORDER BY r.r_date,r.rs_time,r.r_seq",
                 (manager_id, manager_id),
             )
-            rows = cursor.fetchall()
+            rows = [row for row in cursor.fetchall() if valid_pickup_reservation(row)]
+            by_code = {}
+            for row in rows:
+                by_code.setdefault(row["match_code"], []).append(row)
             prior_by_code = {
                 code: legacy_results(cursor, code)
                 for code in {r["match_code"] for r in rows}
@@ -896,7 +944,8 @@ def match_list(manager_id: str = Depends(require_manager)):
                     not prior and cached and cached[0]["m_id"] != manager_id
                 ):
                     continue
-                if not own and not schedule_matches(row, assignments):
+                if not own and (not schedule_matches(row, assignments)
+                                or not confirmed_pickup(by_code[code])):
                     continue
                 if code not in groups:
                     groups[code] = dict(
@@ -980,3 +1029,5 @@ def match_command(
 # [수정 끝]
 
 # 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
