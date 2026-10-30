@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 담당자·필터별 조회를 분리하고 심의 시작 후 목록과 상세를 함께 갱신합니다.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,32 +15,32 @@ final reportServiceProvider = Provider(
   (ref) => ReportService(ref.watch(operationsApiProvider)),
 );
 // 쓰기 재전송 없이 오류 화면에서 사용자가 재시도하도록 조회 자동 재시도도 끕니다.
-final reportListProvider = FutureProvider.autoDispose
-    .family<ReportCollection, ReportQuery>(
-      (ref, query) => ref
-          .watch(reportServiceProvider)
-          .list(state: query.state, sport: query.sport),
+final reportListProvider = AsyncNotifierProvider.autoDispose
+    .family<ReportListNotifier, ReportCollection, ReportQuery>(
+      ReportListNotifier.new,
       retry: (_, _) => null,
     );
-final reportDetailProvider = FutureProvider.autoDispose
-    .family<ReportRecord, ReportDetailKey>(
-      (ref, key) => ref.watch(reportServiceProvider).detail(key.id),
+final reportDetailProvider = AsyncNotifierProvider.autoDispose
+    .family<ReportDetailNotifier, ReportRecord, ReportDetailKey>(
+      ReportDetailNotifier.new,
       retry: (_, _) => null,
     );
 
-class ReportFilter extends Notifier<({String? state, String? sport})> {
+class ReportFilter extends AsyncNotifier<({String? state, String? sport})> {
   @override
   ({String? state, String? sport}) build() {
     ref.watch(loginProvider);
     return (state: null, sport: null);
   }
 
-  void selectState(String? value) => state = (state: value, sport: state.sport);
-  void selectSport(String? value) => state = (state: state.state, sport: value);
+  void selectState(String? value) =>
+      state = AsyncData((state: value, sport: state.requireValue.sport));
+  void selectSport(String? value) =>
+      state = AsyncData((state: state.requireValue.state, sport: value));
 }
 
 final reportFilterProvider =
-    NotifierProvider.autoDispose<
+    AsyncNotifierProvider.autoDispose<
       ReportFilter,
       ({String? state, String? sport})
     >(ReportFilter.new);
@@ -80,3 +82,26 @@ String reportErrorText(Object error) => error is OperationsApiException
     ? error.message
     : '신고 정보를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class ReportListNotifier extends AsyncNotifier<ReportCollection> {
+  ReportListNotifier(this.query);
+  final ReportQuery query;
+  @override
+  FutureOr<ReportCollection> build() => ref
+      .watch(reportServiceProvider)
+      .list(state: query.state, sport: query.sport);
+}
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class ReportDetailNotifier extends AsyncNotifier<ReportRecord> {
+  ReportDetailNotifier(this.key);
+  final ReportDetailKey key;
+  @override
+  FutureOr<ReportRecord> build() =>
+      ref.watch(reportServiceProvider).detail(key.id);
+}
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

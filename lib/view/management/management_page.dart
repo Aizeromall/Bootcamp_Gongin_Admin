@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 기존 회원·매니저 목록과 실제 ID 상세를 목업의 좌우 분할 화면으로 연결합니다.
@@ -17,11 +19,27 @@ class ManagementPage extends ConsumerStatefulWidget {
   ConsumerState<ManagementPage> createState() => _ManagementPageState();
 }
 
-class _ManagementPageState extends ConsumerState<ManagementPage> {
-  String keyword = '';
-  String? selected;
+class _ManagementPageState extends ConsumerState<ManagementPage>
+    with AsyncScreenState<ManagementPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'keyword': '',
+    'selected': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String get keyword => screenValue<String>('keyword');
+  set keyword(String value) => setScreenValue('keyword', value);
+  String? get selected => screenValue<String?>('selected');
+  set selected(String? value) => setScreenValue('selected', value);
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final category = widget.managers ? 'managers' : 'members';
     final path =
         '/management/$category?keyword=${Uri.encodeQueryComponent(keyword)}';
@@ -38,7 +56,7 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
                     prefixIcon: Icon(Icons.search),
                   ),
                   textInputAction: TextInputAction.search,
-                  onFieldSubmitted: (v) => setState(() {
+                  onFieldSubmitted: (v) => updateScreen(() {
                     keyword = v.trim();
                     selected = null;
                   }),
@@ -56,6 +74,8 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
           child: RecordsView(
             path: path,
             builder: (data) {
+              // 수정 일 : 2026-10-30 / 작업자 : 양태건
+              // API가 완료 경기 수 내림차순으로 반환한 순서를 유지합니다.
               final rows = (data['results'] as List? ?? [])
                   .cast<Map<String, dynamic>>();
               if (rows.isEmpty) {
@@ -66,7 +86,7 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
               final id = selected ?? '${rows.first[idKey]}';
               return AdminSplitView(
                 selected: selected != null,
-                onBack: () => setState(() => selected = null),
+                onBack: () => updateScreen(() => selected = null),
                 list: ListView(
                   children: [
                     Padding(
@@ -95,10 +115,11 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(
-                            '${r[idKey]} · ${widget.managers ? '제재 ${r['sanction_count'] ?? '—'}건' : '경기 ${r['match_count'] ?? '—'}회 · 경고 ${r['warning_count'] ?? '—'}회'}',
+                            '${r[idKey]} · ${widget.managers ? '경기 ${r['match_count'] ?? '—'}건' : '경기 ${r['match_count'] ?? '—'}회 · 경고 ${r['warning_count'] ?? '—'}회'}',
                           ),
                           trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () => setState(() => selected = '${r[idKey]}'),
+                          onTap: () =>
+                              updateScreen(() => selected = '${r[idKey]}'),
                         ),
                       ),
                   ],
@@ -117,14 +138,20 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
                             RecordDetails(
                               record: {
                                 for (final e in record.entries)
-                                  if (e.value is! List) e.key: e.value,
+                                  if (e.value is! List &&
+                                      (!widget.managers ||
+                                          e.key != 'sanction_count'))
+                                    e.key: e.value,
                               },
                             ),
                           ],
                         ),
                       ),
                       for (final e in record.entries)
-                        if (e.value is List)
+                        // 수정 일 : 2026-10-30 / 작업자 : 양태건
+                        // 매니저 상세에서는 제재 이력을 표시하지 않습니다. 회원 이력은 유지합니다.
+                        if (e.value is List &&
+                            (!widget.managers || e.key != 'sanctions'))
                           AdminCard(
                             child: RecordDetails(record: {e.key: e.value}),
                           ),
@@ -140,3 +167,7 @@ class _ManagementPageState extends ConsumerState<ManagementPage> {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

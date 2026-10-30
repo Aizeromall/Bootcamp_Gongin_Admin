@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 담당자와 조회 조건을 키로 사용하고 저장 후 목록·집계를 함께 갱신합니다.
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,11 +15,9 @@ typedef AdminQuery = ({String staffId, String path});
 final headquartersServiceProvider = Provider(
   (ref) => HeadquartersService(ref.watch(operationsApiProvider)),
 );
-final adminDataProvider = FutureProvider.autoDispose
-    .family<AdminPayload, AdminQuery>(
-      (ref, query) async => AdminPayload(
-        await ref.watch(operationsDataProvider(query.path).future),
-      ),
+final adminDataProvider = AsyncNotifierProvider.autoDispose
+    .family<AdminDataNotifier, AdminPayload, AdminQuery>(
+      AdminDataNotifier.new,
       retry: (_, _) => null,
     );
 
@@ -85,3 +85,15 @@ String adminError(Object error) => error is OperationsApiException
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class AdminDataNotifier extends AsyncNotifier<AdminPayload> {
+  AdminDataNotifier(this.query);
+  final AdminQuery query;
+  @override
+  Future<AdminPayload> build() async =>
+      AdminPayload(await ref.watch(operationsDataProvider(query.path).future));
+}
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

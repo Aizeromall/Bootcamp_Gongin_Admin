@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // Figma 3:32의 교육 목록·상세·이수 현황을 실제 교육 API에 연결합니다.
 import 'package:flutter/material.dart';
@@ -81,8 +83,19 @@ class EducationPage extends ConsumerStatefulWidget {
   ConsumerState<EducationPage> createState() => _EducationPageState();
 }
 
-class _EducationPageState extends ConsumerState<EducationPage> {
-  String? selected;
+class _EducationPageState extends ConsumerState<EducationPage>
+    with AsyncScreenState<EducationPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'selected': null};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String? get selected => screenValue<String?>('selected');
+  set selected(String? value) => setScreenValue('selected', value);
   Future<void> openCreate([String category = '필수', String? managerId]) async {
     final id = await showDialog<String>(
       context: context,
@@ -94,7 +107,7 @@ class _EducationPageState extends ConsumerState<EducationPage> {
       ),
     );
     if (id != null && mounted) {
-      setState(() => selected = id);
+      updateScreen(() => selected = id);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('교육을 개설했습니다.')));
     }
@@ -102,6 +115,7 @@ class _EducationPageState extends ConsumerState<EducationPage> {
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final async = ref.watch(educationListProvider(widget.staffId));
     final value = async.asData?.value;
     return ColoredBox(
@@ -249,8 +263,9 @@ class _EducationPageState extends ConsumerState<EducationPage> {
                                           ? AdminStyle.selected
                                           : Colors.white,
                                       child: InkWell(
-                                        onTap: () =>
-                                            setState(() => selected = item.id),
+                                        onTap: () => updateScreen(
+                                          () => selected = item.id,
+                                        ),
                                         child: Padding(
                                           padding: const EdgeInsets.fromLTRB(
                                             16,
@@ -346,7 +361,7 @@ class _EducationPageState extends ConsumerState<EducationPage> {
                           staffId: widget.staffId,
                           onBack: wide
                               ? null
-                              : () => setState(() => selected = null),
+                              : () => updateScreen(() => selected = null),
                           onRetraining: () => openCreate('재교육'),
                           onManagerRetraining: (id) => openCreate('재교육', id),
                         );
@@ -823,26 +838,43 @@ class EducationCreateDialog extends ConsumerStatefulWidget {
       _EducationCreateDialogState();
 }
 
-class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
-  final form = GlobalKey<FormState>();
-  final title = TextEditingController(),
-      location = TextEditingController(),
-      instructor = TextEditingController(),
-      description = TextEditingController(),
-      duration = TextEditingController(text: '60');
-  late String category = widget.category;
-  String format = '오프라인';
-  DateTime? scheduled;
-  final managerIds = <String>{};
+class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog>
+    with AsyncScreenState<EducationCreateDialog> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
   @override
-  void initState() {
-    super.initState();
-    if (widget.initialManagerId != null) {
-      managerIds.add(widget.initialManagerId!);
-    }
-  }
+  Map<String, Object?> initialScreenValues() => {
+    'category': widget.category,
+    'format': '오프라인',
+    'scheduled': null,
+    'managerIds': <String>{
+      if (widget.initialManagerId != null) widget.initialManagerId!,
+    },
+    'validation': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+    'managerIds': Set<String>.from(values['managerIds'] as Set),
+  };
 
-  String? validation;
+  final form = GlobalKey<FormState>();
+  late final title = screenTextController('title'),
+      location = screenTextController('location'),
+      instructor = screenTextController('instructor'),
+      description = screenTextController('description'),
+      duration = screenTextController('duration', text: '60');
+  String get category => screenValue<String>('category');
+  set category(String value) => setScreenValue('category', value);
+  String get format => screenValue<String>('format');
+  set format(String value) => setScreenValue('format', value);
+  DateTime? get scheduled => screenValue<DateTime?>('scheduled');
+  set scheduled(DateTime? value) => setScreenValue('scheduled', value);
+  Set<String> get managerIds => screenValue<Set<String>>('managerIds');
+  set managerIds(Set<String> value) => setScreenValue('managerIds', value);
+
+  String? get validation => screenValue<String?>('validation');
+  set validation(String? value) => setScreenValue('validation', value);
   @override
   void dispose() {
     for (final c in [title, location, instructor, description, duration]) {
@@ -853,6 +885,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final managers = ref.watch(educationManagersProvider(widget.staffId));
     final mutation = ref.watch(educationMutationProvider(widget.staffId));
     return PopScope(
@@ -885,7 +918,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                     ],
                     onChanged: mutation.isLoading
                         ? null
-                        : (v) => setState(() => category = v!),
+                        : (v) => updateScreen(() => category = v!),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -897,7 +930,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                     ],
                     onChanged: mutation.isLoading
                         ? null
-                        : (v) => setState(() => format = v!),
+                        : (v) => updateScreen(() => format = v!),
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
@@ -925,7 +958,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                                   : TimeOfDay.fromDateTime(scheduled!),
                             );
                             if (time != null && mounted) {
-                              setState(
+                              updateScreen(
                                 () => scheduled = DateTime(
                                   date.year,
                                   date.month,
@@ -991,7 +1024,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                     child: TextButton(
                       onPressed: mutation.isLoading
                           ? null
-                          : () => setState(() => managerIds.clear()),
+                          : () => updateScreen(() => managerIds.clear()),
                       child: const Text('대상 선택 초기화'),
                     ),
                   ),
@@ -1026,7 +1059,7 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                                   value: managerIds.contains(m.id),
                                   onChanged: mutation.isLoading
                                       ? null
-                                      : (v) => setState(() {
+                                      : (v) => updateScreen(() {
                                           if (v == true) {
                                             managerIds.add(m.id);
                                           } else {
@@ -1063,7 +1096,9 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                 : () async {
                     if (!form.currentState!.validate()) return;
                     if (scheduled == null || managerIds.isEmpty) {
-                      setState(() => validation = '교육 일정과 대상 매니저를 선택해 주세요.');
+                      updateScreen(
+                        () => validation = '교육 일정과 대상 매니저를 선택해 주세요.',
+                      );
                       return;
                     }
                     // 수정 일 : 2026-10-27 / 작업자 : 양태건
@@ -1076,13 +1111,13 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
                         .toSet();
                     if (allowed == null ||
                         managerIds.any((id) => !allowed.contains(id))) {
-                      setState(
+                      updateScreen(
                         () => validation =
                             '현재 배정 가능한 매니저만 선택해 주세요. 선택을 초기화한 뒤 다시 선택할 수 있습니다.',
                       );
                       return;
                     }
-                    setState(() => validation = null);
+                    updateScreen(() => validation = null);
                     final success = await ref
                         .read(
                           educationMutationProvider(widget.staffId).notifier,
@@ -1115,3 +1150,5 @@ class _EducationCreateDialogState extends ConsumerState<EducationCreateDialog> {
   }
 }
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

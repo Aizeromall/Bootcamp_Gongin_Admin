@@ -76,6 +76,11 @@ app.include_router(vacation_router)
 app.include_router(ground_approval_router)
 app.include_router(ground_contract_router)
 app.include_router(ground_photo_router)
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 본사 전용 지도 좌표→주소 조회(기존 최종 승인 저장 흐름 유지).
+from FastAPI.approval.ground_location import router as ground_location_router
+app.include_router(ground_location_router)
+
 app.include_router(write_announce_router) # 공지 작성 / 작업자 : 최현준 / 작업 일 : 2026-10-27
 app.include_router(admin_announce_router) # 본사 공지 조회
 app.include_router(manager_announce_router) # 매니저 공지 조회
@@ -84,6 +89,9 @@ app.include_router(inquiry_router, prefix="/inquiry", tags=["inquiry"])
 # 수정일 : 2026-10-26
 # [추가 시작]
 app.include_router(match_operations_router)
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+from FastAPI.match.team_match_operations import router as team_operations_router
+app.include_router(team_operations_router)
 app.include_router(manager_result_search_router)
 # [추가 끝]
 app.include_router(education_router)
@@ -124,3 +132,7 @@ if __name__ == "__main__":
 # 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
 
 # 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 취소 사유는 숫자로 요청하고 서버의 성공이 확인된 뒤에만 창을 닫습니다.
 import 'package:flutter/material.dart';
@@ -12,18 +14,42 @@ class MatchCancelDialog extends ConsumerStatefulWidget {
     super.key,
     required this.target,
     required this.groundName,
+    this.teamCode,
+    this.absentCount,
   });
+  final int? teamCode;
+  final int? absentCount;
   final CancellationKey target;
   final String groundName;
   @override
   ConsumerState<MatchCancelDialog> createState() => _MatchCancelDialogState();
 }
 
-class _MatchCancelDialogState extends ConsumerState<MatchCancelDialog> {
-  int? reason;
+class _MatchCancelDialogState extends ConsumerState<MatchCancelDialog>
+    with AsyncScreenState<MatchCancelDialog> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'reason': null};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  int? get reason => screenValue<int?>('reason');
+  set reason(int? value) => setScreenValue('reason', value);
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(matchCancellationProvider(widget.target));
+    watchScreen();
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 공통 취소 창에서 팀 경기코드를 포함한 요청 상태를 분리합니다.
+    final provider = widget.teamCode == null
+        ? matchCancellationProvider(widget.target)
+        : teamMatchCancellationProvider((
+            target: widget.target,
+            teamCode: widget.teamCode!,
+          ));
+    final state = ref.watch(provider);
     return PopScope(
       canPop: !state.isLoading,
       child: AlertDialog(
@@ -49,8 +75,20 @@ class _MatchCancelDialogState extends ConsumerState<MatchCancelDialog> {
                   ],
                   onChanged: state.isLoading
                       ? null
-                      : (v) => setState(() => reason = v),
+                      : (v) => updateScreen(() => reason = v),
                 ),
+                // 수정 일 : 2026-10-30 / 작업자 : 양태건
+                // 시설·우천은 차감하지 않고 노쇼 취소의 결석자 패널티만 사전 안내합니다.
+                if (reason != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      reason == 3
+                          ? '${widget.absentCount == null ? '결석으로 확인된 회원' : '결석 확인 ${widget.absentCount}명'}에게 최대 -30점의 노쇼 패널티가 적용됩니다. 최저 1000점이며 출석·미확인 회원은 제외됩니다.'
+                          : '시설 문제·우천 취소에는 점수 패널티가 적용되지 않습니다.',
+                      style: TextStyle(color: reason == 3 ? Colors.red : null),
+                    ),
+                  ),
                 if (state.hasError)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -75,7 +113,7 @@ class _MatchCancelDialogState extends ConsumerState<MatchCancelDialog> {
                 ? null
                 : () async {
                     final saved = await ref
-                        .read(matchCancellationProvider(widget.target).notifier)
+                        .read(provider.notifier)
                         .submit(reason!);
                     if (saved && context.mounted) Navigator.pop(context, true);
                   },
@@ -87,3 +125,7 @@ class _MatchCancelDialogState extends ConsumerState<MatchCancelDialog> {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

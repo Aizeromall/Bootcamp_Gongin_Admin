@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 본사 신고 업무를 상태·종목 필터와 목록/상세 분할 화면으로 제공합니다.
 import 'package:flutter/material.dart';
@@ -42,11 +44,23 @@ class ReportPage extends ConsumerStatefulWidget {
   ConsumerState<ReportPage> createState() => _ReportPageState();
 }
 
-class _ReportPageState extends ConsumerState<ReportPage> {
-  int? selectedId;
+class _ReportPageState extends ConsumerState<ReportPage>
+    with AsyncScreenState<ReportPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'selectedId': null};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  int? get selectedId => screenValue<int?>('selectedId');
+  set selectedId(int? value) => setScreenValue('selectedId', value);
   @override
   Widget build(BuildContext context) {
-    final filters = ref.watch(reportFilterProvider);
+    watchScreen();
+    final filters = ref.watch(reportFilterProvider).requireValue;
     final query = (
       staffId: widget.staffId,
       state: filters.state,
@@ -147,7 +161,7 @@ class _ReportPageState extends ConsumerState<ReportPage> {
                               fontWeight: FontWeight.w600,
                             ),
                             onSelected: (_) {
-                              setState(() => selectedId = null);
+                              updateScreen(() => selectedId = null);
                               ref
                                   .read(reportFilterProvider.notifier)
                                   .selectState(status == '전체' ? null : status);
@@ -166,7 +180,7 @@ class _ReportPageState extends ConsumerState<ReportPage> {
                       label: const Text('전체 종목'),
                       selected: filters.sport == null,
                       onSelected: (_) {
-                        setState(() => selectedId = null);
+                        updateScreen(() => selectedId = null);
                         ref
                             .read(reportFilterProvider.notifier)
                             .selectSport(null);
@@ -180,7 +194,7 @@ class _ReportPageState extends ConsumerState<ReportPage> {
                         ),
                         selected: filters.sport == sport['sport'],
                         onSelected: (_) {
-                          setState(() => selectedId = null);
+                          updateScreen(() => selectedId = null);
                           ref
                               .read(reportFilterProvider.notifier)
                               .selectSport('${sport['sport']}');
@@ -219,7 +233,7 @@ class _ReportPageState extends ConsumerState<ReportPage> {
                       reports: data.reports,
                       total: data.total,
                       selectedId: selected?.id,
-                      onSelected: (id) => setState(() => selectedId = id),
+                      onSelected: (id) => updateScreen(() => selectedId = id),
                     );
                     if (!wide && selected == null) return list;
                     final detail = _ReportDetail(
@@ -227,7 +241,7 @@ class _ReportPageState extends ConsumerState<ReportPage> {
                       detailKey: (staffId: widget.staffId, id: selected.id),
                       onBack: wide
                           ? null
-                          : () => setState(() => selectedId = null),
+                          : () => updateScreen(() => selectedId = null),
                     );
                     return wide
                         ? Row(
@@ -784,3 +798,5 @@ class _ReportEmpty extends StatelessWidget {
   );
 }
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

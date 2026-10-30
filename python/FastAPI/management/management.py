@@ -8,6 +8,26 @@ from database import connect
 
 router = APIRouter(prefix="/management", tags=["management"])
 
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 회원별·팀별 결과를 경기 코드로 합쳐 경기당 한 번만 집계합니다.
+# 출석/부상만 저장된 진행 기록과 취소 패널티 기록은 완료 경기에서 제외합니다.
+_MANAGER_MATCH_COUNTS = """
+    SELECT completed.m_id, COUNT(*) AS match_count
+    FROM (
+        SELECT m_id, c_r_r_code COLLATE utf8mb4_unicode_ci AS match_code
+        FROM c_result_record
+        WHERE c_r_r_score IS NOT NULL AND TRIM(c_r_r_score) <> ''
+          AND c_r_r_code IS NOT NULL AND TRIM(c_r_r_code) <> ''
+        UNION
+        SELECT m_id, t_r_r_m_code COLLATE utf8mb4_unicode_ci AS match_code
+        FROM t_result_record
+        WHERE t_r_r_score IS NOT NULL AND TRIM(t_r_r_score) <> ''
+          AND t_r_r_m_code IS NOT NULL AND TRIM(t_r_r_m_code) <> ''
+    ) completed
+    GROUP BY completed.m_id
+"""
+
+
 # 유효 경고 수 = 제재 건수 - 처리된(h_id 있음) 이의신청 건수 (0 미만 방지)
 _WARN_SQL = """
     GREATEST(
@@ -124,16 +144,20 @@ async def list_managers(keyword: str = ""):
         conn = connect()
         curs = conn.cursor(pymysql.cursors.DictCursor)
 
-        sql = """
+        # 수정 일 : 2026-10-30 / 작업자 : 양태건
+        # 기존 제재 응답은 호환을 위해 유지하고 완료 경기 집계·내림차순을 추가합니다.
+        sql = f"""
             SELECT m.m_id, m.m_name, m.m_phone, m.m_gender, m.m_workplace,
-                   (SELECT COUNT(*) FROM sanction s WHERE s.m_id = m.m_id) AS sanction_count
+                   (SELECT COUNT(*) FROM sanction s WHERE s.m_id = m.m_id) AS sanction_count,
+                   COALESCE(games.match_count, 0) AS match_count
             FROM match_manager m
+            LEFT JOIN ({_MANAGER_MATCH_COUNTS}) games ON games.m_id = m.m_id
         """
         params = []
         if keyword:
             sql += " WHERE m.m_name LIKE %s OR m.m_id LIKE %s OR m.m_phone LIKE %s"
             params = [_like(keyword)] * 3
-        sql += " ORDER BY m.m_id"
+        sql += " ORDER BY match_count DESC, m.m_id"
 
         curs.execute(sql, params)
         rows = curs.fetchall()
@@ -196,3 +220,5 @@ async def get_manager(m_id: str):
     finally:
         if conn:
             conn.close()
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

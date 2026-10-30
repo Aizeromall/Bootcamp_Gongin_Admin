@@ -58,6 +58,11 @@ def group_results(member_rows, team_rows, manager_id):
     for code in members.keys() | teams.keys():
         rows, team_records = members.get(code, []), teams.get(code, [])
         kind = "pickup" if "_" in code else "team"
+        # 수정 일 : 2026-10-30 / 작업자 : 양태건
+        # 최종 등록으로 차감 이력이 저장된 결석자는 별도 명단에 표시합니다.
+        absentees = [r for r in rows if r.get("c_r_r_attendance") == 0
+                     and r.get("c_r_r_rating_before") is not None
+                     and r.get("c_r_r_rating_after") is not None]
         # 출석만 저장된 행은 경기 완료 결과가 아닙니다.
         rows = [r for r in rows if r.get("c_r_r_score") is not None]
         if not rows and not team_records:
@@ -109,7 +114,9 @@ def group_results(member_rows, team_rows, manager_id):
             "raw_score": None if pair else origin.get("c_r_r_score") or origin.get("t_r_r_score"),
             "home_score": pair[0] if pair else None, "away_score": pair[1] if pair else None,
             "stat_columns": [{"key": key, "label": label} for key, label, _ in STAT_KEYS.get(sport, [])],
-            "sides": [{"name": name, "members": list(players.values())} for name, players in sides.items()],
+            "sides": [{"name": name, "members": list(players.values())} for name, players in sides.items()]
+                + ([{"name": "결석 · 노쇼 패널티", "members": list({r["c_id_seq"]: member_document(r) for r in absentees}.values())}]
+                   if absentees else []),
             "team_summary": [{
                 "name": r.get("t_name"), "t_id": r["t_id"],
                 "score": (score_value(r.get("t_r_r_score")) or (None, None))[0],
@@ -131,7 +138,9 @@ def read_results(manager_id, code=None):
                  WHERE history.c_id_seq=rr.c_id_seq AND history.c_r_r_score IS NOT NULL) AS completed_match_count
                 FROM c_result_record rr LEFT JOIN customer c ON c.c_id_seq=rr.c_id_seq
                 LEFT JOIN ground g ON g.g_code=rr.g_code LEFT JOIN match_manager mm ON mm.m_id=rr.m_id
-                WHERE rr.m_id=%s AND rr.c_r_r_score IS NOT NULL"""
+                WHERE rr.m_id=%s AND (rr.c_r_r_score IS NOT NULL OR
+                    (rr.c_r_r_attendance=0 AND rr.c_r_r_rating_before IS NOT NULL
+                     AND rr.c_r_r_rating_after IS NOT NULL))"""
             params = [manager_id]
             if code is not None:
                 member_sql += " AND rr.c_r_r_code=%s"
@@ -212,7 +221,7 @@ def upcoming(manager_id: str = Depends(require_manager)):
 
 @router.get("/teams/{code}/roster")
 def team_roster(code: int, manager_id: str = Depends(require_manager)):
-    """배정된 팀 경기의 현재 팀원 명단. 경기 출석 기록으로 취급하지 않습니다."""
+    """담당 팀 경기의 실제 시간대 예약자 출전·출석 명단."""
     conn = None
     try:
         conn = connect()
@@ -221,15 +230,19 @@ def team_roster(code: int, manager_id: str = Depends(require_manager)):
             match = cursor.fetchone()
             if match is None:
                 raise HTTPException(404, "담당하는 팀 경기가 아닙니다.")
-            cursor.execute("""SELECT DISTINCT tr.t_id, c.c_id_seq, c.c_name, c.c_rating, c.c_position, t.t_name
-                FROM t_register tr JOIN customer c ON c.c_id_seq=tr.c_id_seq JOIN team t ON t.t_id=tr.t_id
-                WHERE tr.t_id IN (%s,%s) AND c.c_deletdate IS NULL AND c.c_team=t.t_name
-                ORDER BY tr.t_id,c.c_name,c.c_id_seq""", (match["home_t_id"], match["away_t_id"]))
-            rows = cursor.fetchall()
-        return {"members": [{"name": row["c_name"], "c_id_seq": row["c_id_seq"], "team": row["t_name"],
-                              "position": row["c_position"], "current_rating": row["c_rating"],
-                              "current_tier": rating_tier(int(row["c_rating"])) if row["c_rating"] is not None else None}
-                             for row in rows], "attendance_supported": False}
+            # 수정 일 : 2026-10-30 / 작업자 : 양태건
+            # 전체 팀원 대신 운영 API와 동일한 시간대 예약 명단을 반환합니다.
+            from .team_match_operations import load_team
+            from .match_operations import _MATCH_LOCK
+            with _MATCH_LOCK:
+                _, state = load_team(cursor, code, manager_id)
+        return {"members": [{"r_seq": p["r_seq"], "name": p["c_name"],
+                  "c_id_seq": p["c_id_seq"], "position": p["c_position"],
+                  "team": state["team_names"][0 if state["fixed_sides"][str(p["r_seq"])] == "A" else 1],
+                  "current_rating": p["c_rating"],
+                  "current_tier": rating_tier(int(p["c_rating"])) if p["c_rating"] is not None else None,
+                  "attendance": state["attendance"].get(str(p["r_seq"]))}
+                 for p in state["players"]], "attendance_supported": True}
     except pymysql.MySQLError:
         logger.exception("팀 경기 명단 조회 실패")
         raise HTTPException(500, "팀 경기 명단을 불러오지 못했습니다.")

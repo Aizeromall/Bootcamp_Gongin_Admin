@@ -16,9 +16,8 @@ import 'package:bootcamp_project_gongin_admin_app/vm/manager_schedule_notifier.d
 
 class ScheduleLogin extends LoginNotifier {
   @override
-  AsyncValue<StaffSession?> build() => const AsyncData(
-    StaffSession(userId: 'manager1', role: LoginRole.manager),
-  );
+  StaffSession? build() =>
+      const StaffSession(userId: 'manager1', role: LoginRole.manager);
   void change() => state = const AsyncData(
     StaffSession(userId: 'manager2', role: LoginRole.manager),
   );
@@ -297,14 +296,18 @@ void main() {
         return jsonResponse({
           'team_code': 9,
           'status': teamStatus,
-          'team_start': '2020-01-01T22:00:00',
+          'team_start': teamStatus == 'waiting_result'
+              ? '2020-01-01T22:00:00'
+              : '2026-10-29T22:00:00',
         });
       });
       final container = ProviderContainer(
         overrides: [
           // 수정 일 : 2026-10-30 / 작업자 : 양태건
           // 날짜 경과와 무관하게 예정·완료 분류 계약을 검사합니다.
-          managerTodayProvider.overrideWithValue(DateTime(2026, 10, 29)),
+          managerTodayProvider.overrideWithBuild(
+            (ref, notifier) => DateTime(2026, 10, 29),
+          ),
           loginProvider.overrideWith(ScheduleLogin.new),
           operationsApiProvider.overrideWithValue(
             OperationsApi(client: client),
@@ -376,7 +379,9 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         loginProvider.overrideWith(ScheduleLogin.new),
-        managerTodayProvider.overrideWithValue(DateTime(2026, 10, 29)),
+        managerTodayProvider.overrideWithBuild(
+          (ref, notifier) => DateTime(2026, 10, 29),
+        ),
         operationsApiProvider.overrideWithValue(OperationsApi(client: client)),
       ],
     );
@@ -419,7 +424,9 @@ void main() {
         ProviderScope(
           overrides: [
             loginProvider.overrideWith(ScheduleLogin.new),
-            managerTodayProvider.overrideWithValue(DateTime(2026, 10, 29)),
+            managerTodayProvider.overrideWithBuild(
+              (ref, notifier) => DateTime(2026, 10, 29),
+            ),
             operationsApiProvider.overrideWithValue(
               OperationsApi(client: client),
             ),
@@ -468,3 +475,5 @@ void main() {
   });
 }
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-29 / 작업자 : 양태건
 // 지난 매치의 통합 목록에서 담당 실력매칭·팀매칭과 경기 상세를 표시합니다.
 import 'package:flutter/material.dart';
@@ -7,8 +9,6 @@ import '../../model/manager_schedule_model.dart';
 import '../../model/manager_result_model.dart';
 import '../../model/match_updates_model.dart';
 import '../../vm/manager_schedule_notifier.dart';
-import '../../vm/manager_result_notifier.dart';
-import '../../model/headquarters_model.dart';
 import '../../vm/headquarters_notifier.dart';
 import '../headquarters/admin_components.dart';
 import '../shared/admin_style.dart';
@@ -21,39 +21,51 @@ class ManagerSchedulePanel extends ConsumerStatefulWidget {
     super.key,
     required this.managerId,
     this.history = false,
-    this.showAllUpcoming = false,
     this.onCompleted,
+    this.onTeamCompleted,
   });
   final bool history;
-  final bool showAllUpcoming;
   final VoidCallback? onCompleted;
+  final VoidCallback? onTeamCompleted;
   final String managerId;
   @override
   ConsumerState<ManagerSchedulePanel> createState() =>
       _ManagerSchedulePanelState();
 }
 
-class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
-  late DateTime day;
-  late bool allUpcoming;
+class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel>
+    with AsyncScreenState<ManagerSchedulePanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
   @override
-  void initState() {
-    super.initState();
-    day = ref.read(managerTodayProvider);
-    allUpcoming = widget.showAllUpcoming;
-  }
+  Map<String, Object?> initialScreenValues() => {
+    'day': ref.read(managerTodayProvider).requireValue,
+    'groundFilter': null,
+    'selected': null,
+    'sport': 'all',
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
 
-  DateTime get today => ref.read(managerTodayProvider);
+  DateTime get day => screenValue<DateTime>('day');
+  set day(DateTime value) => setScreenValue('day', value);
+
+  DateTime get today => ref.read(managerTodayProvider).requireValue;
   DateTime get displayedDay =>
       !widget.history && day.isBefore(today) ? today : day;
-  String? groundFilter, selected;
-  String sport = 'all';
+  String? get groundFilter => screenValue<String?>('groundFilter');
+  set groundFilter(String? value) => setScreenValue('groundFilter', value);
+  String? get selected => screenValue<String?>('selected');
+  set selected(String? value) => setScreenValue('selected', value);
+  String get sport => screenValue<String>('sport');
+  set sport(String value) => setScreenValue('sport', value);
   String get date =>
       '${displayedDay.year.toString().padLeft(4, '0')}-${displayedDay.month.toString().padLeft(2, '0')}-${displayedDay.day.toString().padLeft(2, '0')}';
   // 수정 일 : 2026-10-29 / 작업자 : 양태건
   // 내 매치에서 과거 날짜를 선택하지 않으며 지난 매치는 기존 조회 범위를 유지합니다.
-  void changeDay(DateTime value) => setState(() {
-    allUpcoming = false;
+  void changeDay(DateTime value) => updateScreen(() {
     day = !widget.history && value.isBefore(today) ? today : value;
     groundFilter = null;
     selected = null;
@@ -61,7 +73,6 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
   String identity(ScheduleGround ground, ScheduleSlot slot) =>
       '${slot.date == null ? '' : '${slot.date}|'}${ground.code}|${slot.start}|${slot.teamCode}';
   void refreshMatches() {
-    ref.invalidate(managerUpcomingProvider(widget.managerId));
     ref.invalidate(
       managerScheduleProvider((managerId: widget.managerId, date: date)),
     );
@@ -90,15 +101,18 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
   );
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final query = (
       managerId: widget.managerId,
       date: date,
       history: widget.history,
     );
-    final result = allUpcoming && !widget.history
-        ? ref.watch(managerUpcomingProvider(widget.managerId))
-        : ref.watch(managerMatchDayProvider(query));
-    final kind = ref.watch(managerMatchKindProvider(widget.managerId));
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 전체 예정 조회 모드를 제거하고 선택한 날짜의 경기만 조회합니다.
+    final result = ref.watch(managerMatchDayProvider(query));
+    final kind = ref
+        .watch(managerMatchKindProvider(widget.managerId))
+        .requireValue;
     return Column(
       children: [
         Padding(
@@ -119,7 +133,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
               ),
               OutlinedButton.icon(
                 icon: const Icon(Icons.calendar_month_outlined),
-                label: Text(allUpcoming ? '오늘 이후 전체' : date),
+                label: Text(date),
                 onPressed: () async {
                   final value = await showDatePicker(
                     context: context,
@@ -141,18 +155,11 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
                 onPressed: () => changeDay(today),
                 child: const Text('오늘'),
               ),
-              if (widget.showAllUpcoming)
-                TextButton(
-                  onPressed: () => setState(() {
-                    allUpcoming = true;
-                    selected = null;
-                  }),
-                  child: const Text('오늘 이후 전체'),
-                ),
+              // 수정 일 : 2026-10-30 / 작업자 : 양태건
+              // 요청에 따라 오늘 이후 전체 조회 버튼을 제거합니다.
               IconButton(
                 tooltip: '담당 일정 새로고침',
                 onPressed: () {
-                  ref.invalidate(managerUpcomingProvider(widget.managerId));
                   ref.invalidate(managerMatchDayProvider(query));
                   ref.invalidate(
                     managerScheduleProvider((
@@ -197,7 +204,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
                       ),
                       label: Text(option.value),
                       selected: sport == option.key,
-                      onSelected: (_) => setState(() {
+                      onSelected: (_) => updateScreen(() {
                         sport = option.key;
                         selected = null;
                       }),
@@ -227,7 +234,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
                           managerMatchKindProvider(widget.managerId).notifier,
                         )
                         .select(entry.key);
-                    setState(() => selected = null);
+                    updateScreen(() => selected = null);
                   },
                 ),
             ],
@@ -276,7 +283,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
                             child: Text(ground.name),
                           ),
                       ],
-                      onChanged: (value) => setState(() {
+                      onChanged: (value) => updateScreen(() {
                         groundFilter = value == 'all' ? null : value;
                         selected = null;
                       }),
@@ -336,7 +343,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
                                         : Icons.schedule,
                                     color: AdminStyle.blue,
                                   ),
-                                  onTap: () => setState(
+                                  onTap: () => updateScreen(
                                     () =>
                                         selected = identity(entry.ground, slot),
                                   ),
@@ -349,7 +356,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
               );
               return AdminSplitView(
                 selected: chosen != null,
-                onBack: () => setState(() => selected = null),
+                onBack: () => updateScreen(() => selected = null),
                 list: list,
                 detail: chosen == null
                     ? const Center(child: Text('매치를 선택하면 경기 정보를 확인할 수 있습니다.'))
@@ -371,11 +378,41 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
         match: entry.operation!,
         managerId: widget.managerId,
         embedded: true,
+        onCancelled: () {
+          refreshMatches();
+          updateScreen(() => selected = null);
+        },
         onPublished: () {
           ref.invalidate(operationsDataProvider('/match/operations'));
           ref.invalidate(managerMatchDayProvider);
-          ref.invalidate(managerUpcomingProvider(widget.managerId));
           widget.onCompleted?.call();
+        },
+      );
+    }
+
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 팀매칭도 예약자 출석 → 고정 팀으로 직접 시작 → 전체 화면 기록을 사용합니다.
+    if (entry.team != null && !widget.history) {
+      return MatchWorkflowPage(
+        key: ValueKey('team-workflow:${entry.team!.code}'),
+        teamCode: entry.team!.code,
+        onCancelled: () {
+          refreshMatches();
+          updateScreen(() => selected = null);
+        },
+        managerId: widget.managerId,
+        embedded: true,
+        match: {
+          'r_seq': entry.team!.code,
+          'g_code': ground.code,
+          'g_name': ground.name,
+          'r_date': slot.date ?? date,
+          'rs_time': slot.start,
+        },
+        onPublished: () {
+          ref.invalidate(managerMatchDayProvider);
+          ref.invalidate(managerScheduleProvider);
+          (widget.onTeamCompleted ?? widget.onCompleted)?.call();
         },
       );
     }
@@ -403,50 +440,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
     );
     return ListView(
       padding: const EdgeInsets.all(22),
-      children: [
-        summary,
-        if (entry.team != null) _teamResult(entry.team!),
-        if (entry.team != null && !widget.history)
-          ref
-              .watch(
-                managerTeamRosterProvider((
-                  managerId: widget.managerId,
-                  code: entry.team!.code,
-                )),
-              )
-              .when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => problem(
-                  error,
-                  () => ref.invalidate(
-                    managerTeamRosterProvider((
-                      managerId: widget.managerId,
-                      code: entry.team!.code,
-                    )),
-                  ),
-                ),
-                data: (data) => AdminCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      adminTitle('현재 팀원 명단'),
-                      for (final player in adminRows(data['members']))
-                        ListTile(
-                          title: Text(adminText(player['name'])),
-                          subtitle: Text(
-                            '${adminText(player['current_tier'])} · ${adminText(player['position'])} · ${adminText(player['team'])}',
-                          ),
-                          trailing: const Text('출석 확인 미지원'),
-                        ),
-                      const Text(
-                        '현재 팀원 명단이며 출전·출석 확정 명단이 아닙니다. 팀 경기 출석과 실시간 진행 API가 없어 이 화면에서는 경기 시작을 처리할 수 없습니다.',
-                        style: TextStyle(color: AdminStyle.muted),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-      ],
+      children: [summary, if (entry.team != null) _teamResult(entry.team!)],
     );
   }
 
@@ -503,3 +497,7 @@ class _ManagerSchedulePanelState extends ConsumerState<ManagerSchedulePanel> {
   );
 }
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

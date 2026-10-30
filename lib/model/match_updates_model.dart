@@ -45,7 +45,7 @@ class TeamMatchRecord {
       : '$homeScore : $awayScore';
 }
 
-const cancellationReasons = {1: '정원 미달', 2: '우천·기상악화', 3: '노쇼 및 환불'};
+const cancellationReasons = {1: '시설 문제', 2: '우천·기상악화', 3: '노쇼 및 환불'};
 
 class CancelledMatch {
   CancelledMatch.fromJson(AdminRow row)
@@ -57,12 +57,16 @@ class CancelledMatch {
       cancelDate = adminText(row['r_cancel_date']),
       reason = adminInt(row['r_c_category']),
       count = adminInt(row['canceled_count']),
-      capacity = adminInt(row['g_num']);
+      capacity = adminInt(row['g_num']),
+      members = adminRows(row['members']);
+  final List<AdminRow> members;
   final String groundCode, ground, date, start, end, cancelDate;
   final int? reason, count, capacity;
   String get reasonName => cancellationReasons[reason] ?? '사유 미확인';
-  String get identity => '$groundCode|$date|$start|$reason';
+  String get identity => '$groundCode|$date|$start|$end|$reason';
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

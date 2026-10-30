@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 작업자 : 양태건
 // 수정일 : 2026-10-26
 // [수정 시작] 예약별 입력 창을 경기별 출석·팀 설정·실시간 기록 흐름으로 변경합니다.
@@ -8,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../service/operations_api.dart';
 import '../../vm/manager_result_notifier.dart';
+import '../../vm/match_workflow_notifier.dart';
+import '../../vm/screen_state_notifier.dart';
 import '../shared/records_view.dart';
 import '../shared/admin_style.dart';
 import '../headquarters/admin_components.dart';
@@ -189,28 +193,76 @@ class MatchWorkflowPage extends ConsumerStatefulWidget {
     this.managerId,
     this.embedded = false,
     this.onPublished,
+    this.onCancelled,
+    this.teamCode,
   });
+  final int? teamCode;
   final bool embedded;
   final VoidCallback? onPublished;
+  final VoidCallback? onCancelled;
   final Map<String, dynamic> match;
   final String? managerId;
   @override
   ConsumerState<MatchWorkflowPage> createState() => _MatchWorkflowPageState();
 }
 
-class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
-  Map<String, dynamic>? data;
-  String? error;
-  bool busy = false;
-  bool checkingAll = false;
-  int? selected;
-  DateTime syncedAt = DateTime.now();
+class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage>
+    with AsyncScreenState<MatchWorkflowPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'checkingAll': false,
+    'selected': null,
+    'syncedAt': DateTime.now(),
+    'assignments': <String, String>{},
+    'colors': <String>['blue', 'grey'],
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+    'assignments': Map<String, String>.from(values['assignments'] as Map),
+    'colors': List<String>.from(values['colors'] as List),
+  };
+
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 서버 원본·통신 상태는 Notifier에서 읽고 화면은 입력·표시 상태만 보관합니다.
+  MatchWorkflowKey get workflowKey => (managerId: widget.managerId, path: path);
+  AsyncValue<Map<String, dynamic>> get workflow =>
+      ref.read(matchWorkflowProvider(workflowKey));
+  Map<String, dynamic>? get data =>
+      ref.read(matchWorkflowProvider(workflowKey).notifier).current;
+  String? get error => workflow.hasError
+      ? workflow.error.toString().replaceFirst('Exception: ', '')
+      : null;
+  bool get busy => workflow.isLoading;
+  bool get checkingAll => screenValue<bool>('checkingAll');
+  set checkingAll(bool value) => setScreenValue('checkingAll', value);
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 진행 화면만 루트 오버레이로 펼쳐 경기 상태·타이머를 같은 State에 유지합니다.
+  final liveOverlay = OverlayPortalController();
+  final liveScroll = ScrollController();
+  int? get selected => screenValue<int?>('selected');
+  set selected(int? value) => setScreenValue('selected', value);
+  DateTime get syncedAt => screenValue<DateTime>('syncedAt');
+  set syncedAt(DateTime value) => setScreenValue('syncedAt', value);
   Timer? timer;
-  final search = TextEditingController();
-  final teamNames = [TextEditingController(), TextEditingController()];
-  Map<String, String> assignments = {};
-  List<String> colors = ['blue', 'grey'];
-  String get path => '/match/operations/${widget.match['r_seq']}';
+  late final search = screenTextController('search');
+  late final teamNames = [
+    screenTextController('teamA'),
+    screenTextController('teamB'),
+  ];
+  Map<String, String> get assignments =>
+      screenValue<Map<String, String>>('assignments');
+  set assignments(Map<String, String> value) =>
+      setScreenValue('assignments', value);
+  List<String> get colors => screenValue<List<String>>('colors');
+  set colors(List<String> value) => setScreenValue('colors', value);
+  bool get isTeamMatch => widget.teamCode != null;
+  String get resultLabel => isTeamMatch ? '팀매칭' : '실력매칭';
+  String get path => isTeamMatch
+      ? '/match/team_operations/${widget.teamCode}'
+      : '/match/operations/${widget.match['r_seq']}';
   Map<String, dynamic> get state => Map<String, dynamic>.from(data!['state']);
   List<Map<String, dynamic>> get players =>
       (state['players'] as List).cast<Map<String, dynamic>>();
@@ -224,15 +276,24 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
   @override
   void initState() {
     super.initState();
-    load();
+    ref.listenManual(matchWorkflowProvider(workflowKey), (previous, next) {
+      if (!mounted) return;
+      final value = next.value;
+      if (value != null && !identical(previous?.value, value)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) updateScreen(() => accept(value));
+        });
+      }
+    }, fireImmediately: true);
     timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && data != null && status == 'live') setState(() {});
+      if (mounted && data != null && status == 'live') updateScreen(() {});
     });
   }
 
   @override
   void dispose() {
     timer?.cancel();
+    liveScroll.dispose();
     search.dispose();
     for (final c in teamNames) {
       c.dispose();
@@ -241,7 +302,11 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
   }
 
   void accept(Map<String, dynamic> value) {
-    data = value;
+    if (status == 'live') {
+      liveOverlay.show();
+    } else {
+      liveOverlay.hide();
+    }
     syncedAt = DateTime.now();
     assignments = Map<String, String>.from(state['assignments']);
     colors = (state['team_colors'] as List).cast<String>().toList();
@@ -251,54 +316,24 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
     }
   }
 
-  Future<void> load() async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      final result = await ref.read(operationsApiProvider).request(path);
-      if (mounted) setState(() => accept(result));
-    } catch (e) {
-      if (mounted) {
-        setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
+  Future<void> load() =>
+      ref.read(matchWorkflowProvider(workflowKey).notifier).reload();
 
   Future<bool> command(
     String action, [
     Map<String, dynamic> values = const {},
   ]) async {
-    if (busy) return false;
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      final result = await ref
-          .read(operationsApiProvider)
-          .request(
-            path,
-            json: {'version': data!['version'], 'action': action, ...values},
-          );
-      if (mounted) setState(() => accept(result));
-      if (mounted && !widget.embedded) {
-        ref.invalidate(operationsDataProvider('/match/operations'));
-      }
-      return true;
-    } catch (e) {
-      if (mounted) {
-        setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error!)));
-      }
-      return false;
-    } finally {
-      if (mounted) setState(() => busy = false);
+    final saved = await ref
+        .read(matchWorkflowProvider(workflowKey).notifier)
+        .command(action, values);
+    if (saved && mounted && !widget.embedded) {
+      ref.invalidate(operationsDataProvider('/match/operations'));
     }
+    if (!saved && mounted && error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error!)));
+    }
+    return saved;
   }
 
   List<Map<String, dynamic>> teamPlayers(String team) =>
@@ -363,46 +398,61 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
     final candidates = teamPlayers(team)
         .where((p) => p['r_seq'] != selected)
         .toList();
-    final chosen = <int>{};
+    final scope = ScreenStateScope(
+      () => {'chosen': <int>{}},
+      (values) => {'chosen': Set<int>.from(values['chosen'] as Set)},
+    );
     return showDialog<List<int>>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: Text('홈인한 주자 선택 · ${chosen.length + 1}점 홈런'),
-          content: SizedBox(
-            width: 360,
-            child: ListView(
-              shrinkWrap: true,
-              children: [
-                const Text('주자 없이 솔로 홈런이면 선택하지 않고 기록하세요. (최대 3명 = 만루 홈런)'),
-                for (final p in candidates)
-                  CheckboxListTile(
-                    value: chosen.contains(p['r_seq']),
-                    title: Text('${p['c_name']}'),
-                    // 3명을 고르면 나머지는 선택할 수 없음
-                    onChanged:
-                        !chosen.contains(p['r_seq']) && chosen.length >= 3
-                        ? null
-                        : (checked) => setDialog(
-                            () => checked == true
-                                ? chosen.add(p['r_seq'] as int)
-                                : chosen.remove(p['r_seq']),
-                          ),
-                  ),
-              ],
+      builder: (context) => Consumer(
+        builder: (context, dialogRef, _) {
+          final chosen =
+              dialogRef.watch(screenStateProvider(scope)).requireValue['chosen']
+                  as Set<int>;
+          return AlertDialog(
+            title: Text('홈인한 주자 선택 · ${chosen.length + 1}점 홈런'),
+            content: SizedBox(
+              width: 360,
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  const Text('주자 없이 솔로 홈런이면 선택하지 않고 기록하세요. (최대 3명 = 만루 홈런)'),
+                  for (final p in candidates)
+                    CheckboxListTile(
+                      value: chosen.contains(p['r_seq']),
+                      title: Text('${p['c_name']}'),
+                      // 3명을 고르면 나머지는 선택할 수 없음
+                      onChanged:
+                          !chosen.contains(p['r_seq']) && chosen.length >= 3
+                          ? null
+                          : (checked) {
+                              final notifier = dialogRef.read(
+                                screenStateProvider(scope).notifier,
+                              );
+                              notifier.edit(() {
+                                final current =
+                                    notifier.current['chosen'] as Set<int>;
+                                checked == true
+                                    ? current.add(p['r_seq'] as int)
+                                    : current.remove(p['r_seq']);
+                              });
+                            },
+                    ),
+                ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('취소'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, chosen.toList()),
-              child: Text('${chosen.length + 1}점 홈런 기록'),
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, chosen.toList()),
+                child: Text('${chosen.length + 1}점 홈런 기록'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -443,6 +493,8 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
+    ref.watch(matchWorkflowProvider(workflowKey));
     final isLive = data != null && status == 'live';
     final theme = isLive
         ? ThemeData.dark(useMaterial3: true).copyWith(
@@ -470,7 +522,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             ),
           )
         : Theme.of(context);
-    return Theme(
+    final embeddedPage = Theme(
       data: theme,
       child: Builder(
         builder: (context) => Scaffold(
@@ -566,10 +618,57 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
         ),
       ),
     );
+    return OverlayPortal(
+      controller: liveOverlay,
+      overlayLocation: OverlayChildLocation.rootOverlay,
+      overlayChildBuilder: (context) => Positioned.fill(
+        child: Theme(
+          data: theme,
+          child: Scaffold(
+            key: const ValueKey('fullscreen-match-live'),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  if (busy) const LinearProgressIndicator(),
+                  if (error != null)
+                    MaterialBanner(
+                      content: Text(error!),
+                      actions: [
+                        TextButton(
+                          onPressed: busy ? null : load,
+                          child: const Text('다시 불러오기'),
+                        ),
+                      ],
+                    ),
+                  Expanded(child: liveScreen()),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      child: isLive ? const SizedBox.expand() : embeddedPage,
+    );
   }
 
   Widget attendanceScreen() {
     final attendance = Map<String, dynamic>.from(state['attendance']);
+    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+    // 서버와 같은 70% 정수 비교를 사용하고 필요 인원은 올림합니다.
+    final presentCount = players
+        .where((p) => attendance['${p['r_seq']}'] == true)
+        .length;
+    final attendanceReady = isTeamMatch
+        ? players.isNotEmpty &&
+              ['A', 'B'].every(
+                (side) => players.any(
+                  (p) =>
+                      state['fixed_sides']?['${p['r_seq']}'] == side &&
+                      attendance['${p['r_seq']}'] == true,
+                ),
+              )
+        : players.isNotEmpty && presentCount * 100 >= players.length * 70;
+    final requiredCount = (players.length * 70 + 99) ~/ 100;
     final rules = ref.watch(managerRatingRulesProvider);
     final filtered = players
         .where(
@@ -591,7 +690,9 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 '일시\n${widget.match['r_date'] ?? ''} ${widget.match['rs_time'] ?? ''}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              const Text('유형\n실력매칭'),
+              // 수정 일 : 2026-10-30 / 작업자 : 양태건
+              // 운영 상세는 서버에서 정원·성사 여부를 검증한 실력매칭만 표시합니다.
+              Text('유형\n$resultLabel · 성사'),
               Text('종목\n${data?['sport']?['name'] ?? '미확인'}'),
               Text(
                 '출석\n${attendance.values.where((value) => value == true).length} / ${players.length}명',
@@ -616,7 +717,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             children: [
               TextField(
                 controller: search,
-                onChanged: (_) => setState(() {}),
+                onChanged: (_) => updateScreen(() {}),
                 decoration: const InputDecoration(
                   labelText: '이름 또는 예약번호 검색',
                   prefixIcon: Icon(Icons.search),
@@ -629,7 +730,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                   onPressed: busy || checkingAll
                       ? null
                       : () async {
-                          setState(() => checkingAll = true);
+                          updateScreen(() => checkingAll = true);
                           try {
                             for (final player in players) {
                               if (state['attendance']['${player['r_seq']}'] ==
@@ -643,19 +744,35 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                               if (!mounted || !saved) break;
                             }
                           } finally {
-                            if (mounted) setState(() => checkingAll = false);
+                            if (mounted) {
+                              updateScreen(() => checkingAll = false);
+                            }
                           }
                         },
                   child: Text(checkingAll ? '출석 확인 중…' : '전원 출석'),
                 ),
               ),
+              // 수정 일 : 2026-10-30 / 작업자 : 양태건
+              // 전체 팀원으로 대체하지 않고 실제 예약 명단이 비었음을 안내합니다.
+              if (isTeamMatch && players.isEmpty)
+                const Text('이 경기 시간대에 예약된 홈·원정 출전자가 없습니다. 예약 명단을 확인해 주세요.'),
               for (final p in filtered)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: CircleAvatar(
+                    backgroundColor: isTeamMatch
+                        ? bibColors[colors[state['fixed_sides']['${p['r_seq']}'] ==
+                                  'A'
+                              ? 0
+                              : 1]]
+                        : null,
                     child: Text('${p['c_name']}'.substring(0, 1)),
                   ),
-                  title: Text('${p['c_name']}'),
+                  title: Text(
+                    isTeamMatch
+                        ? "${p['c_name']} · ${state['team_names'][state['fixed_sides']['${p['r_seq']}'] == 'A' ? 0 : 1]}"
+                        : '${p['c_name']}',
+                  ),
                   subtitle: Text(
                     '${rules.asData?.value.tier(p['c_rating']) ?? '레벨 미확인'} · ${p['c_position'] ?? '포지션 미등록'} · 예약 ${p['r_seq']}',
                   ),
@@ -689,16 +806,20 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
           ),
         ),
         section(
-          '출석 확인 후 팀을 배정해 주세요',
+          isTeamMatch ? '출석 확인 후 경기를 시작해 주세요' : '출석 확인 후 팀을 배정해 주세요',
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('모든 예약자를 출석 또는 결석으로 확인해 주세요. 출석한 회원만 팀에 배정됩니다.'),
+              Text(
+                isTeamMatch
+                    ? '해당 구장·시간에 예약한 회원만 표시됩니다. 전원의 출석·결석을 확인하고 홈·원정 팀에 각각 출석자가 있어야 시작할 수 있습니다. 팀은 변경하지 않습니다.'
+                    : '모든 예약자를 출석 또는 결석으로 확인해 주세요. 출석률 70% 이상이어야 시작할 수 있습니다.\n현재 출석 $presentCount/${players.length}명 · 최소 $requiredCount명 필요',
+              ),
               const SizedBox(height: 16),
               actionButton(
-                '경기 시작 · 팀 설정',
-                attendance.length == players.length
-                    ? () => command('teams')
+                isTeamMatch ? '경기 시작' : '경기 시작 · 팀 설정',
+                attendance.length == players.length && attendanceReady
+                    ? () => command(isTeamMatch ? 'start' : 'teams')
                     : null,
               ),
               if (widget.managerId != null && widget.match['g_code'] != null)
@@ -714,7 +835,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                               !RegExp(r'^([01]\d|2[0-3]):[0-5]\d(:00)?$')
                                   .hasMatch(time)) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text('경기 일시를 확인할 수 없습니다. 다시 불러와 주세요.'),
                               ),
                             );
@@ -724,6 +845,14 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                             context: context,
                             barrierDismissible: false,
                             builder: (_) => MatchCancelDialog(
+                              teamCode: widget.teamCode,
+                              absentCount: players
+                                  .where(
+                                    (p) =>
+                                        state['attendance']['${p['r_seq']}'] ==
+                                        false,
+                                  )
+                                  .length,
                               groundName: '${widget.match['g_name'] ?? '구장'}',
                               target: (
                                 managerId: widget.managerId!,
@@ -735,7 +864,13 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                           );
                           if (cancelled == true && mounted) {
                             final messenger = ScaffoldMessenger.of(context);
-                            Navigator.of(context).pop(false);
+                            // 수정 일 : 2026-10-30 / 작업자 : 양태건
+                            // 내 매치 내부 화면에서는 대시보드 자체를 pop하지 않습니다.
+                            if (widget.embedded) {
+                              widget.onCancelled?.call();
+                            } else {
+                              Navigator.of(context).pop(false);
+                            }
                             messenger.showSnackBar(
                               const SnackBar(
                                 content: Text('경기 예약 취소가 처리되었습니다.'),
@@ -757,6 +892,8 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
         .toList();
     final a = teamPlayers('A').length, b = teamPlayers('B').length;
     final valid =
+        players.isNotEmpty &&
+        present.length * 100 >= players.length * 70 &&
         assignments.length == present.length &&
         a > 0 &&
         b > 0 &&
@@ -786,7 +923,8 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                               child: InkWell(
                                 onTap: busy
                                     ? null
-                                    : () => setState(() => colors[i] = e.key),
+                                    : () =>
+                                          updateScreen(() => colors[i] = e.key),
                                 child: CircleAvatar(
                                   backgroundColor: e.value,
                                   radius: 18,
@@ -826,7 +964,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 child: TextButton(
                   onPressed: busy
                       ? null
-                      : () => setState(() => assignments.clear()),
+                      : () => updateScreen(() => assignments.clear()),
                   child: const Text('배정 초기화'),
                 ),
               ),
@@ -846,7 +984,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                         : {assignments['${p['r_seq']}']!},
                     onSelectionChanged: busy
                         ? null
-                        : (v) => setState(() {
+                        : (v) => updateScreen(() {
                             if (v.isEmpty) {
                               assignments.remove('${p['r_seq']}');
                             } else {
@@ -1010,7 +1148,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
             child: ListTile(
               onTap: busy
                   ? null
-                  : () => setState(() => selected = p['r_seq'] as int),
+                  : () => updateScreen(() => selected = p['r_seq'] as int),
               leading: CircleAvatar(
                 backgroundColor: bibColors[colors[team == 'A' ? 0 : 1]],
                 child: Text(
@@ -1113,11 +1251,12 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
       ),
     );
     return ListView(
+      controller: liveScroll,
       padding: const EdgeInsets.all(24),
       children: [
         scoreboard(),
         LayoutBuilder(
-          builder: (context, constraints) => constraints.maxWidth >= 1000
+          builder: (context, constraints) => constraints.maxWidth >= 850
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1211,6 +1350,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
   Widget resultScreen() => data!['legacy'] == true
       ? legacyResultScreen()
       : ListView(
+          key: const ValueKey("match-review-scroll"),
           padding: const EdgeInsets.all(24),
           children: [
             scoreboard(),
@@ -1276,9 +1416,25 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      '등록하면 모든 회원의 결과가 함께 저장되고 실력매칭 결과로 이동합니다. 등록 후에는 수정할 수 없습니다.',
+                    Text(
+                      '등록하면 모든 회원의 결과가 함께 저장되고 $resultLabel 결과로 이동합니다. 등록 후에는 수정할 수 없습니다.',
                     ),
+                    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+                    // 최종 등록 시 노쇼 차감을 적용하므로 등록 전에 대상 인원을 안내합니다.
+                    if (!isTeamMatch &&
+                        players.any(
+                          (p) => state['attendance']['${p['r_seq']}'] == false,
+                        ))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(
+                          "결석자 ${players.where((p) => state['attendance']['${p['r_seq']}'] == false).length}명에게 노쇼 패널티 -30점이 적용됩니다. 최저 점수는 1000점입니다. 등록 전 출석 상태를 확인해 주세요.",
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                     const SizedBox(height: 16),
                     Wrap(
                       spacing: 16,
@@ -1292,9 +1448,9 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                           final saved = await command('publish');
                           if (saved && mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text(
-                                  '결과가 등록되었습니다. 실력매칭에서 확인할 수 있습니다.',
+                                  '결과가 등록되었습니다. $resultLabel에서 확인할 수 있습니다.',
                                 ),
                               ),
                             );
@@ -1313,7 +1469,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
                 ),
               ),
             if (status == 'completed')
-              actionButton('실력매칭 결과 목록으로', () {
+              actionButton('$resultLabel 결과 목록으로', () {
                 if (widget.embedded) {
                   widget.onPublished?.call();
                 } else {
@@ -1357,7 +1513,7 @@ class _MatchWorkflowPageState extends ConsumerState<MatchWorkflowPage> {
 // 작업자 : 양태건
 // 수정일 : 2026-10-26
 // [추가 시작] 선택한 선수의 부상 정보를 저장하는 입력 창입니다.
-class InjurySheet extends StatefulWidget {
+class InjurySheet extends ConsumerStatefulWidget {
   const InjurySheet({
     super.key,
     required this.playerName,
@@ -1366,31 +1522,55 @@ class InjurySheet extends StatefulWidget {
   final String playerName;
   final int elapsed;
   @override
-  State<InjurySheet> createState() => _InjurySheetState();
+  ConsumerState<InjurySheet> createState() => _InjurySheetState();
 }
 
-class _InjurySheetState extends State<InjurySheet> {
-  final parts = <String>{};
-  final measures = <String>{};
-  String severity = 'mild';
-  bool contact = false;
-  final description = TextEditingController();
-  String? error;
+class _InjurySheetState extends ConsumerState<InjurySheet>
+    with AsyncScreenState<InjurySheet> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'parts': <String>{},
+    'measures': <String>{},
+    'severity': 'mild',
+    'contact': false,
+    'error': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+    'parts': Set<String>.from(values['parts'] as Set),
+    'measures': Set<String>.from(values['measures'] as Set),
+  };
+
+  Set<String> get parts => screenValue<Set<String>>('parts');
+  set parts(Set<String> value) => setScreenValue('parts', value);
+  Set<String> get measures => screenValue<Set<String>>('measures');
+  set measures(Set<String> value) => setScreenValue('measures', value);
+  String get severity => screenValue<String>('severity');
+  set severity(String value) => setScreenValue('severity', value);
+  bool get contact => screenValue<bool>('contact');
+  set contact(bool value) => setScreenValue('contact', value);
+  late final description = screenTextController('description');
+  String? get error => screenValue<String?>('error');
+  set error(String? value) => setScreenValue('error', value);
   @override
   void dispose() {
     description.dispose();
     super.dispose();
   }
 
-  Widget chips(List<String> choices, Set<String> selected) => Wrap(
+  Widget chips(List<String> choices, String field) => Wrap(
     spacing: 8,
     runSpacing: 8,
     children: [
       for (final choice in choices)
         FilterChip(
           label: Text(choice),
-          selected: selected.contains(choice),
-          onSelected: (v) => setState(() {
+          selected: screenValue<Set<String>>(field).contains(choice),
+          onSelected: (v) => updateScreen(() {
+            final selected = screenValue<Set<String>>(field);
             if (v) {
               selected.add(choice);
             } else {
@@ -1401,115 +1581,122 @@ class _InjurySheetState extends State<InjurySheet> {
     ],
   );
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: MediaQuery.sizeOf(context).height * .88,
-    child: SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(
-        24,
-        24,
-        24,
-        MediaQuery.viewInsetsOf(context).bottom + 24,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            '부상 기록 · ${widget.playerName}',
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            '긴급 상황이면 먼저 119에 신고하고 경기장 AED·구급함 위치를 확인해 주세요. 기록은 나중에 해도 됩니다.',
-            style: TextStyle(color: Colors.red),
-          ),
-          const SizedBox(height: 20),
-          const Text('부상 부위 (복수 선택)'),
-          chips([
-            '머리·얼굴',
-            '목·어깨',
-            '팔·손목',
-            '손가락',
-            '허리·등',
-            '무릎',
-            '발목·발',
-            '기타',
-          ], parts),
-          const SizedBox(height: 16),
-          const Text('부상 정도'),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final e in {
-                'mild': '경미 · 현장 처치 후 계속 경기',
-                'moderate': '중등도 · 경기 이탈 · 병원 권유',
-                'severe': '심각 · 119 · 병원 이송',
-              }.entries)
-                ChoiceChip(
-                  label: Text(e.value),
-                  selected: severity == e.key,
-                  onSelected: (_) => setState(() => severity = e.key),
+  Widget build(BuildContext context) {
+    watchScreen();
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * .88,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          24,
+          24,
+          24,
+          MediaQuery.viewInsetsOf(context).bottom + 24,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '부상 기록 · ${widget.playerName}',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '긴급 상황이면 먼저 119에 신고하고 경기장 AED·구급함 위치를 확인해 주세요. 기록은 나중에 해도 됩니다.',
+              style: TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 20),
+            const Text('부상 부위 (복수 선택)'),
+            chips([
+              '머리·얼굴',
+              '목·어깨',
+              '팔·손목',
+              '손가락',
+              '허리·등',
+              '무릎',
+              '발목·발',
+              '기타',
+            ], 'parts'),
+            const SizedBox(height: 16),
+            const Text('부상 정도'),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final e in {
+                  'mild': '경미 · 현장 처치 후 계속 경기',
+                  'moderate': '중등도 · 경기 이탈 · 병원 권유',
+                  'severe': '심각 · 119 · 병원 이송',
+                }.entries)
+                  ChoiceChip(
+                    label: Text(e.value),
+                    selected: severity == e.key,
+                    onSelected: (_) => updateScreen(() => severity = e.key),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text('조치'),
+            chips([
+              '아이싱',
+              '응급처치·밴드',
+              '경기 일시 중단',
+              '교체·퇴장',
+              '119 신고',
+              '병원 이송',
+              '보호자 연락',
+            ], 'measures'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: description,
+              maxLines: 4,
+              maxLength: 2000,
+              decoration: const InputDecoration(labelText: '상황 · 부상 내용'),
+            ),
+            SwitchListTile(
+              title: const Text('상대 선수와 접촉'),
+              value: contact,
+              onChanged: (v) => updateScreen(() => contact = v),
+            ),
+            Text('발생 시각 ${clockText(widget.elapsed)}'),
+            if (error != null)
+              Text(error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 20),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 12,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('취소'),
                 ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text('조치'),
-          chips([
-            '아이싱',
-            '응급처치·밴드',
-            '경기 일시 중단',
-            '교체·퇴장',
-            '119 신고',
-            '병원 이송',
-            '보호자 연락',
-          ], measures),
-          const SizedBox(height: 16),
-          TextField(
-            controller: description,
-            maxLines: 4,
-            maxLength: 2000,
-            decoration: const InputDecoration(labelText: '상황 · 부상 내용'),
-          ),
-          SwitchListTile(
-            title: const Text('상대 선수와 접촉'),
-            value: contact,
-            onChanged: (v) => setState(() => contact = v),
-          ),
-          Text('발생 시각 ${clockText(widget.elapsed)}'),
-          if (error != null)
-            Text(error!, style: const TextStyle(color: Colors.red)),
-          const SizedBox(height: 20),
-          Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 12,
-            children: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('취소'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (parts.isEmpty || description.text.trim().isEmpty) {
-                    setState(() => error = '부상 부위와 상황을 입력해 주세요.');
-                    return;
-                  }
-                  Navigator.pop(context, <String, dynamic>{
-                    'occurred_seconds': widget.elapsed,
-                    'body_parts': parts.toList(),
-                    'severity': severity,
-                    'measures': measures.toList(),
-                    'description': description.text.trim(),
-                    'contact': contact,
-                  });
-                },
-                child: const Text('부상 기록 저장'),
-              ),
-            ],
-          ),
-        ],
+                FilledButton(
+                  onPressed: () {
+                    if (parts.isEmpty || description.text.trim().isEmpty) {
+                      updateScreen(() => error = '부상 부위와 상황을 입력해 주세요.');
+                      return;
+                    }
+                    Navigator.pop(context, <String, dynamic>{
+                      'occurred_seconds': widget.elapsed,
+                      'body_parts': parts.toList(),
+                      'severity': severity,
+                      'measures': measures.toList(),
+                      'description': description.text.trim(),
+                      'contact': contact,
+                    });
+                  },
+                  child: const Text('부상 기록 저장'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 // [추가 끝]
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

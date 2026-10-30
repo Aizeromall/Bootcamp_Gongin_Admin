@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 새 본사 팀 매칭 API와 역할별 취소 내역을 기존 매치 화면 안에서 제공합니다.
 import 'package:flutter/material.dart';
@@ -25,86 +27,119 @@ Widget _problem(Object error, VoidCallback retry) => Center(
   ),
 );
 
-class HeadquartersMatchWorkbench extends StatefulWidget {
+class HeadquartersMatchWorkbench extends ConsumerStatefulWidget {
   const HeadquartersMatchWorkbench({super.key, required this.staffId});
   final String staffId;
   @override
-  State<HeadquartersMatchWorkbench> createState() =>
+  ConsumerState<HeadquartersMatchWorkbench> createState() =>
       _HeadquartersMatchWorkbenchState();
 }
 
 class _HeadquartersMatchWorkbenchState
-    extends State<HeadquartersMatchWorkbench> {
-  String tab = 'social';
+    extends ConsumerState<HeadquartersMatchWorkbench>
+    with AsyncScreenState<HeadquartersMatchWorkbench> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(14),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'social', label: Text('매니저별 예약')),
-              ButtonSegment(value: 'team', label: Text('팀 대 팀 매칭')),
-              ButtonSegment(value: 'cancel', label: Text('취소 경기')),
-            ],
-            selected: {tab},
-            onSelectionChanged: (v) => setState(() => tab = v.first),
+  Map<String, Object?> initialScreenValues() => {'tab': 'social'};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String get tab => screenValue<String>('tab');
+  set tab(String value) => setScreenValue('tab', value);
+  @override
+  Widget build(BuildContext context) {
+    watchScreen();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'social', label: Text('매니저별 예약')),
+                ButtonSegment(value: 'team', label: Text('팀 대 팀 매칭')),
+                ButtonSegment(value: 'cancel', label: Text('취소 경기')),
+              ],
+              selected: {tab},
+              onSelectionChanged: (v) => updateScreen(() => tab = v.first),
+            ),
           ),
         ),
-      ),
-      Expanded(
-        child: switch (tab) {
-          'team' => TeamMatchPanel(staffId: widget.staffId),
-          'cancel' => CancelledMatchPanel(staffId: widget.staffId),
-          _ => ManagerWorkPanel(staffId: widget.staffId),
-        },
-      ),
-    ],
-  );
+        Expanded(
+          child: switch (tab) {
+            'team' => TeamMatchPanel(staffId: widget.staffId),
+            'cancel' => CancelledMatchPanel(staffId: widget.staffId),
+            _ => ManagerWorkPanel(staffId: widget.staffId),
+          },
+        ),
+      ],
+    );
+  }
 }
 
-class ManagerHistoryWorkbench extends StatefulWidget {
+class ManagerHistoryWorkbench extends ConsumerStatefulWidget {
   const ManagerHistoryWorkbench({super.key, required this.managerId});
   final String managerId;
   @override
-  State<ManagerHistoryWorkbench> createState() =>
+  ConsumerState<ManagerHistoryWorkbench> createState() =>
       _ManagerHistoryWorkbenchState();
 }
 
-class _ManagerHistoryWorkbenchState extends State<ManagerHistoryWorkbench> {
+class _ManagerHistoryWorkbenchState
+    extends ConsumerState<ManagerHistoryWorkbench>
+    with AsyncScreenState<ManagerHistoryWorkbench> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'tab': 'completed'};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
   // 수정 일 : 2026-10-29 / 작업자 : 양태건
   // 내 매치의 통합 목록을 지난 매치로 이동하고 완료 기록·취소 내역을 유지합니다.
-  String tab = 'completed';
+  String get tab => screenValue<String>('tab');
+  set tab(String value) => setScreenValue('tab', value);
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(14),
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'completed', label: Text('완료 매치')),
-              ButtonSegment(value: 'cancelled', label: Text('담당 구장 취소')),
-            ],
-            selected: {tab},
-            onSelectionChanged: (value) => setState(() => tab = value.single),
+  Widget build(BuildContext context) {
+    watchScreen();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'completed', label: Text('완료 매치')),
+                ButtonSegment(value: 'cancelled', label: Text('담당 구장 취소')),
+              ],
+              selected: {tab},
+              onSelectionChanged: (value) =>
+                  updateScreen(() => tab = value.single),
+            ),
           ),
         ),
-      ),
-      Expanded(
-        child: switch (tab) {
-          'cancelled' => CancelledMatchPanel(
-            staffId: widget.managerId,
-            managerId: widget.managerId,
-          ),
-          _ => ManagerSchedulePanel(managerId: widget.managerId, history: true),
-        },
-      ),
-    ],
-  );
+        Expanded(
+          child: switch (tab) {
+            'cancelled' => CancelledMatchPanel(
+              staffId: widget.managerId,
+              managerId: widget.managerId,
+            ),
+            _ => ManagerSchedulePanel(
+              managerId: widget.managerId,
+              history: true,
+            ),
+          },
+        ),
+      ],
+    );
+  }
 }
 
 class TeamMatchPanel extends ConsumerStatefulWidget {
@@ -114,12 +149,30 @@ class TeamMatchPanel extends ConsumerStatefulWidget {
   ConsumerState<TeamMatchPanel> createState() => _TeamMatchPanelState();
 }
 
-class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel> {
-  String keyword = '';
-  String? status;
-  int? selected;
+class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel>
+    with AsyncScreenState<TeamMatchPanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'keyword': '',
+    'status': null,
+    'selected': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String get keyword => screenValue<String>('keyword');
+  set keyword(String value) => setScreenValue('keyword', value);
+  String? get status => screenValue<String?>('status');
+  set status(String? value) => setScreenValue('status', value);
+  int? get selected => screenValue<int?>('selected');
+  set selected(int? value) => setScreenValue('selected', value);
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final query = (staffId: widget.staffId, status: status, keyword: keyword);
     final list = ref.watch(teamMatchesProvider(query));
     return Column(
@@ -139,7 +192,7 @@ class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel> {
                     prefixIcon: Icon(Icons.search),
                   ),
                   textInputAction: TextInputAction.search,
-                  onSubmitted: (v) => setState(() {
+                  onSubmitted: (v) => updateScreen(() {
                     keyword = v.trim();
                     selected = null;
                   }),
@@ -156,7 +209,7 @@ class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel> {
                   }.entries)
                     DropdownMenuItem(value: e.key, child: Text(e.value)),
                 ],
-                onChanged: (v) => setState(() {
+                onChanged: (v) => updateScreen(() {
                   status = v == 'all' ? null : v;
                   selected = null;
                 }),
@@ -190,7 +243,7 @@ class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel> {
               }
               return AdminSplitView(
                 selected: selected != null,
-                onBack: () => setState(() => selected = null),
+                onBack: () => updateScreen(() => selected = null),
                 list: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
@@ -210,7 +263,7 @@ class _TeamMatchPanelState extends ConsumerState<TeamMatchPanel> {
                           ),
                           isThreeLine: true,
                           trailing: adminBadge(row.statusName),
-                          onTap: () => setState(() => selected = row.code),
+                          onTap: () => updateScreen(() => selected = row.code),
                         ),
                       ),
                   ],
@@ -312,11 +365,27 @@ class CancelledMatchPanel extends ConsumerStatefulWidget {
       _CancelledMatchPanelState();
 }
 
-class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
-  int? reason;
-  CancelledMatch? selected;
+class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel>
+    with AsyncScreenState<CancelledMatchPanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'reason': null,
+    'selected': null,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  int? get reason => screenValue<int?>('reason');
+  set reason(int? value) => setScreenValue('reason', value);
+  CancelledMatch? get selected => screenValue<CancelledMatch?>('selected');
+  set selected(CancelledMatch? value) => setScreenValue('selected', value);
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final query = (
       staffId: widget.staffId,
       managerId: widget.managerId,
@@ -337,7 +406,7 @@ class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
                     for (final e in cancellationReasons.entries)
                       DropdownMenuItem(value: e.key, child: Text(e.value)),
                   ],
-                  onChanged: (v) => setState(() {
+                  onChanged: (v) => updateScreen(() {
                     reason = v == 0 ? null : v;
                     selected = null;
                   }),
@@ -348,7 +417,7 @@ class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
                 onPressed: () {
                   selected = null;
                   ref.invalidate(cancelledMatchesProvider(query));
-                  setState(() {});
+                  updateScreen(() {});
                 },
                 icon: const Icon(Icons.refresh),
               ),
@@ -370,7 +439,7 @@ class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
                   }
                   return AdminSplitView(
                     selected: selected != null,
-                    onBack: () => setState(() => selected = null),
+                    onBack: () => updateScreen(() => selected = null),
                     list: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
@@ -384,7 +453,7 @@ class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
                                 '${row.date} · ${row.start}\n${row.reasonName} · 예약 ${adminText(row.count)}건',
                               ),
                               isThreeLine: true,
-                              onTap: () => setState(() => selected = row),
+                              onTap: () => updateScreen(() => selected = row),
                             ),
                           ),
                       ],
@@ -459,3 +528,5 @@ class _CancelledMatchPanelState extends ConsumerState<CancelledMatchPanel> {
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

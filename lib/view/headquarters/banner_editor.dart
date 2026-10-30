@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-28 / 작업자 : 양태건
 // 공지 작성 창 안에서 독립 배너 이미지를 업로드하고 노출 기간을 지정합니다.
 import 'dart:typed_data';
@@ -22,16 +24,43 @@ class BannerEditor extends ConsumerStatefulWidget {
   ConsumerState<BannerEditor> createState() => _BannerEditorState();
 }
 
-class _BannerEditorState extends ConsumerState<BannerEditor> {
-  BannerImage? selected;
-  Uint8List? bytes;
-  String? filename, message, error;
-  DateTimeRange? period;
-  bool picking = false;
+class _BannerEditorState extends ConsumerState<BannerEditor>
+    with AsyncScreenState<BannerEditor> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {
+    'selected': null,
+    'bytes': null,
+    'filename': null,
+    'message': null,
+    'error': null,
+    'period': null,
+    'picking': false,
+  };
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  BannerImage? get selected => screenValue<BannerImage?>('selected');
+  set selected(BannerImage? value) => setScreenValue('selected', value);
+  Uint8List? get bytes => screenValue<Uint8List?>('bytes');
+  set bytes(Uint8List? value) => setScreenValue('bytes', value);
+  String? get filename => screenValue<String?>('filename');
+  set filename(String? value) => setScreenValue('filename', value);
+  String? get message => screenValue<String?>('message');
+  set message(String? value) => setScreenValue('message', value);
+  String? get error => screenValue<String?>('error');
+  set error(String? value) => setScreenValue('error', value);
+  DateTimeRange? get period => screenValue<DateTimeRange?>('period');
+  set period(DateTimeRange? value) => setScreenValue('period', value);
+  bool get picking => screenValue<bool>('picking');
+  set picking(bool value) => setScreenValue('picking', value);
   String date(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
   Future<void> pick() async {
-    setState(() {
+    updateScreen(() {
       picking = true;
       error = null;
       message = null;
@@ -58,19 +87,19 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
       }
       final content = await file.readAsBytes();
       if (!mounted) return;
-      setState(() {
+      updateScreen(() {
         bytes = content;
         filename = file.name;
         selected = null;
       });
     } catch (_) {
       if (mounted) {
-        setState(
+        updateScreen(
           () => error = '이미지를 선택하지 못했습니다. 10MB 이하 JPEG·PNG·WebP 파일을 확인해 주세요.',
         );
       }
     } finally {
-      if (mounted) setState(() => picking = false);
+      if (mounted) updateScreen(() => picking = false);
     }
   }
 
@@ -89,6 +118,7 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
   );
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final session = ref.watch(loginProvider).asData?.value;
     final permitted =
         session?.userId == widget.staffId &&
@@ -128,7 +158,7 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
                           .read(bannerMutationProvider(widget.staffId).notifier)
                           .upload(filename!, bytes!);
                       if (!mounted || image == null) return;
-                      setState(() {
+                      updateScreen(() {
                         selected = image;
                         bytes = null;
                         filename = null;
@@ -185,7 +215,7 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
                       ],
                       onChanged: !permitted || busy
                           ? null
-                          : (id) => setState(() {
+                          : (id) => updateScreen(() {
                               selected = images.firstWhere(
                                 (image) => image.id == id,
                               );
@@ -217,7 +247,7 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
                             : null,
                       );
                       if (!mounted || value == null) return;
-                      setState(() {
+                      updateScreen(() {
                         period = value;
                         message = null;
                       });
@@ -241,7 +271,7 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
                             date(period!.end),
                           );
                       if (!mounted || !saved) return;
-                      setState(() {
+                      updateScreen(() {
                         error = null;
                         message = '배너 노출 설정을 저장했습니다. 공지 등록과는 별도입니다.';
                       });
@@ -264,3 +294,5 @@ class _BannerEditorState extends ConsumerState<BannerEditor> {
   }
 }
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

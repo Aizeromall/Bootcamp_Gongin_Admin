@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 작업자 : 최현준 / 작업 일 : 2026-10-24
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,11 +14,22 @@ class LoginPage extends ConsumerStatefulWidget {
   ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends ConsumerState<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage>
+    with AsyncScreenState<LoginPage> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'_obscure': true};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
   final _form = GlobalKey<FormState>();
-  final _id = TextEditingController();
-  final _password = TextEditingController();
-  bool _obscure = true;
+  late final _id = screenTextController('_id');
+  late final _password = screenTextController('_password');
+  bool get _obscure => screenValue<bool>('_obscure');
+  set _obscure(bool value) => setScreenValue('_obscure', value);
 
   @override
   void dispose() {
@@ -33,12 +46,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!mounted) return;
     if (ref.read(loginProvider).value != null) {
       _password.clear();
-      setState(() {});
+      updateScreen(() {});
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     final state = ref.watch(loginProvider);
     final loggedIn = state.asData?.value;
     if (loggedIn != null) {
@@ -121,7 +135,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 suffixIcon: IconButton(
                                   tooltip: _obscure ? '비밀번호 표시' : '비밀번호 숨기기',
                                   onPressed: () =>
-                                      setState(() => _obscure = !_obscure),
+                                      updateScreen(() => _obscure = !_obscure),
                                   icon: Icon(
                                     _obscure
                                         ? Icons.visibility_outlined
@@ -228,3 +242,5 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 // 최종 수정일 : 2026-10-24
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

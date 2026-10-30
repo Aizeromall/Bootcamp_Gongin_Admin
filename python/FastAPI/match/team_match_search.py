@@ -146,6 +146,8 @@ TEAM_MATCH_SELECT = f"""
         rm.m_id AS rental_m_id, rm.m_name AS rental_m_name
     FROM (
         SELECT tm.team_code, tm.team_num, tm.team_start, tm.team_end,
+            (SELECT c.c_prefer_stock FROM team_create tc JOIN customer c ON c.c_id_seq=tc.c_id_seq WHERE tc.t_id=tm.home_t_id LIMIT 1) AS home_sport,
+            (SELECT c.c_prefer_stock FROM team_create tc JOIN customer c ON c.c_id_seq=tc.c_id_seq WHERE tc.t_id=tm.away_t_id LIMIT 1) AS away_sport,
             (SELECT tc.c_category FROM team_create tc WHERE tc.t_id=tm.home_t_id LIMIT 1) AS home_category,
             (SELECT tc.c_category FROM team_create tc WHERE tc.t_id=tm.away_t_id LIMIT 1) AS away_category,
             tm.home_t_id, ht.t_name AS home_t_name, ht.t_logo AS home_t_logo,
@@ -383,7 +385,9 @@ def team_match_to_dict(row: dict, results: dict, stats: dict) -> dict:
     return {
         # 수정 일 : 2026-10-29 / 작업자 : 양태건
         # 프론트가 팀명으로 종목을 추측하지 않도록 실제 팀 종목을 반환합니다.
-        "e_code": {"축구": "SOCCER", "배구": "VOLLEYBALL", "농구": "BASKETBALL", "야구": "BASEBALL"}.get(row.get("home_category")) if row.get("home_category") == row.get("away_category") else None,
+        # 수정 일 : 2026-10-30 / 작업자 : 양태건
+        # c_category는 개설일/폐지일이므로 개설 회원의 가입 종목으로 팀 종목을 확인합니다.
+        "e_code": {"1": "SOCCER", "2": "BASKETBALL", "3": "BASEBALL", "4": "VOLLEYBALL"}.get(str(row.get("home_sport"))) if row.get("home_sport") == row.get("away_sport") else None,
         "team_code": row["team_code"],                       # 매치코드
         "team_num": row["team_num"],                         # 경기 인원 (구장 수용인원)
         "team_start": row["team_start"],                     # 경기 시작 일시

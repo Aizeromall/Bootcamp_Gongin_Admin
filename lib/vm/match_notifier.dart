@@ -1,3 +1,4 @@
+import 'dart:async';
 // ###  2026.10.23 본사 구장 관리 - 구장 조회 Riverpod 상태관리 구성   - 신현진
 //
 // [이 파일의 역할]
@@ -20,7 +21,7 @@
 //        error: (error, stack) => Text('$error'),          // 조회 실패
 //      );
 //   2) 구장 검색 버튼 (구장명/주소로 관리 대상 구장 찾기)
-//      ref.read(groundListProvider.notifier).searchGrounds('영등포');
+//      ref.read(groundKeywordProvider.notifier).select('영등포');
 //   3) 구장 상세 화면 (본사에서 구장 정보 확인)
 //      final groundAsync = ref.watch(groundDetailProvider('1'));
 
@@ -32,42 +33,63 @@ import '../model/ground_model.dart';
 import '../service/operations_api.dart';
 import 'login_notifier.dart';
 
-final groundKeywordProvider = NotifierProvider<GroundKeyword, String>(
+final groundKeywordProvider = AsyncNotifierProvider<GroundKeyword, String>(
   GroundKeyword.new,
 );
 
-class GroundKeyword extends Notifier<String> {
+class GroundKeyword extends AsyncNotifier<String> {
   @override
   String build() {
     ref.watch(loginProvider);
     return '';
   }
 
-  void select(String value) => state = value.trim();
+  void select(String value) => state = AsyncData(value.trim());
 }
 
-final groundListProvider = FutureProvider.autoDispose<List<Ground>>((
-  ref,
-) async {
-  final api = ref.watch(operationsApiProvider);
-  final keyword = ref.watch(groundKeywordProvider);
-  final path = Uri(
-    path: '/match/ground',
-    queryParameters: keyword.isEmpty ? null : {'keyword': keyword},
-  ).toString();
-  final data = await api.request(path);
-  return (data['results'] as List)
-      .map((row) => Ground.fromJson(Map<String, dynamic>.from(row as Map)))
-      .toList();
-}, retry: (_, _) => null);
+final groundListProvider =
+    AsyncNotifierProvider.autoDispose<GroundListNotifier, List<Ground>>(
+      GroundListNotifier.new,
+      retry: (_, _) => null,
+    );
 
-final groundDetailProvider = FutureProvider.autoDispose.family<Ground, String>((
-  ref,
-  code,
-) async {
-  final data = await ref
-      .watch(operationsApiProvider)
-      .request('/match/ground/${Uri.encodeComponent(code)}');
-  return Ground.fromJson(data);
-}, retry: (_, _) => null);
+final groundDetailProvider = AsyncNotifierProvider.autoDispose
+    .family<GroundDetailNotifier, Ground, String>(
+      GroundDetailNotifier.new,
+      retry: (_, _) => null,
+    );
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class GroundListNotifier extends AsyncNotifier<List<Ground>> {
+  @override
+  Future<List<Ground>> build() async {
+    final api = ref.watch(operationsApiProvider);
+    final keyword = ref.watch(groundKeywordProvider).requireValue;
+    final path = Uri(
+      path: '/match/ground',
+      queryParameters: keyword.isEmpty ? null : {'keyword': keyword},
+    ).toString();
+    final data = await api.request(path);
+    return (data['results'] as List)
+        .map((row) => Ground.fromJson(Map<String, dynamic>.from(row as Map)))
+        .toList();
+  }
+}
+
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 조회 상태를 AsyncNotifier가 소유하며 기존 조건별 캐시와 오류 처리를 유지합니다.
+class GroundDetailNotifier extends AsyncNotifier<Ground> {
+  GroundDetailNotifier(this.code);
+  final String code;
+  @override
+  Future<Ground> build() async {
+    final data = await ref
+        .watch(operationsApiProvider)
+        .request('/match/ground/${Uri.encodeComponent(code)}');
+    return Ground.fromJson(data);
+  }
+}
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

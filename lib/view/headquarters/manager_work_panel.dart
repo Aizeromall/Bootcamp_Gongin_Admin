@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 본사는 매니저별 예약을 조회하며 매니저 경기 진행 권한을 사용하지 않습니다.
 import 'package:flutter/material.dart';
@@ -13,44 +15,60 @@ class ManagerWorkPanel extends ConsumerStatefulWidget {
   ConsumerState<ManagerWorkPanel> createState() => _ManagerWorkPanelState();
 }
 
-class _ManagerWorkPanelState extends ConsumerState<ManagerWorkPanel> {
-  String? manager;
+class _ManagerWorkPanelState extends ConsumerState<ManagerWorkPanel>
+    with AsyncScreenState<ManagerWorkPanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      if (constraints.maxWidth < 850) return _content(context);
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 320,
-            child: Material(
-              color: Colors.white,
-              child: AdminData(
-                staffId: widget.staffId,
-                path: '/approval/grounds/managers',
-                builder: (p) => ListView(
-                  children: [
-                    for (final row in p.rows)
-                      ListTile(
-                        selected: manager == '${row['m_id']}',
-                        title: Text(adminText(row['m_name'])),
-                        subtitle: Text(
-                          '${adminText(row['m_id'])} · ${adminText(row['m_workplace'])}',
+  Map<String, Object?> initialScreenValues() => {'manager': null};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  String? get manager => screenValue<String?>('manager');
+  set manager(String? value) => setScreenValue('manager', value);
+  @override
+  Widget build(BuildContext context) {
+    watchScreen();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 850) return _content(context);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 320,
+              child: Material(
+                color: Colors.white,
+                child: AdminData(
+                  staffId: widget.staffId,
+                  path: '/approval/grounds/managers',
+                  builder: (p) => ListView(
+                    children: [
+                      for (final row in p.rows)
+                        ListTile(
+                          selected: manager == '${row['m_id']}',
+                          title: Text(adminText(row['m_name'])),
+                          subtitle: Text(
+                            '${adminText(row['m_id'])} · ${adminText(row['m_workplace'])}',
+                          ),
+                          onTap: () =>
+                              updateScreen(() => manager = '${row['m_id']}'),
                         ),
-                        onTap: () => setState(() => manager = '${row['m_id']}'),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          const VerticalDivider(width: 1),
-          Expanded(child: _content(context)),
-        ],
-      );
-    },
-  );
+            const VerticalDivider(width: 1),
+            Expanded(child: _content(context)),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _content(BuildContext context) => Column(
     children: [
       Padding(
@@ -70,7 +88,7 @@ class _ManagerWorkPanelState extends ConsumerState<ManagerWorkPanel> {
                   ),
                 ),
             ],
-            onChanged: (v) => setState(() => manager = v),
+            onChanged: (v) => updateScreen(() => manager = v),
           ),
         ),
       ),
@@ -118,3 +136,5 @@ class _ManagerWorkPanelState extends ConsumerState<ManagerWorkPanel> {
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

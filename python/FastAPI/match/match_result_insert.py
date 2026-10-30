@@ -207,7 +207,7 @@ def team_new_rating(rating: int, opponent_rating: int, result: float) -> int:
 #       scores["A"], scores["B"], match_code=경기코드)
 #   match_code : 경기코드를 주면 그 경기의 회원 결과 기록(c_result_record)에 반영 전 / 후 점수도 저장
 #                (기록 줄이 먼저 저장돼 있어야 함, 2026.10.29 신현진)
-#                결석 회원 기록(같은 경기코드, 점수가 빈 줄)은 전 = 후 = 현재 c_rating으로 저장 (2026.10.29 신현진)
+#                결석 회원의 기존 동일 점수 저장(2026.10.29 신현진)은 아래 노쇼 패널티로 보완 (2026.10.30 양태건)
 def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_a: int, score_b: int,
                          match_code: Optional[str] = None) -> list:
     if e_code not in STAT_KEYS:
@@ -269,25 +269,66 @@ def apply_member_ratings(cursor, e_code: str, team_a: list, team_b: list, score_
                 "tier_after": rating_tier(after),        # 경기 후 등급
             })
 
-    # 중간 수정 작성자 - 신현진
-    # 수정일 2026.10.29
-    # 4) 결석한 회원 기록에도 전 / 후 점수 저장 (점수 미반영 → 전 = 후 = 그 회원의 현재 c_rating)
-    #    출석 회원은 위 3)에서 이미 저장했으므로, 그 경기 기록 중 점수가 아직 비어 있는 줄이 결석 회원
-    #    DB 기본값(1500)을 쓰면 실제 점수가 다른 회원도 1500으로 보이므로 회원의 현재 점수로 채움
-    #    (회원 앱의 점수 변동 목록·추이 그래프에 결석 경기도 실제 점수로 이어서 표시)
-    #    팀 매치 결과 등록은 참가 회원 기록만 저장하므로 해당하는 줄이 없음
-    if match_code is not None:
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    # 신현진님의 결석 전·후 동일 점수 저장을 노쇼 패널티로 변경합니다.
+    # 실력매칭의 결과 등록 트랜잭션 안에서만 실행합니다. 팀매칭에는 적용하지 않습니다.
+    if match_code is not None and "_" in match_code:
+        changes.extend(apply_absence_penalties(cursor, match_code))
+    return changes
+
+
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 같은 경기에서 결석 확정·점수 미반영·유효 예약인 회원만 잠가 차감합니다.
+# 평상시 실력매칭 결과 등록과 실력/팀매칭 노쇼 취소가 공유합니다.
+# 호출자가 commit/rollback을 소유하며 실패하면 경기 결과와 패널티가 함께 롤백됩니다.
+def apply_absence_penalties(cursor, match_code: str, reservation_ids: list[int] | None = None) -> list:
+    from .match_schedule import NOT_CANCELED_CONDITION
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    # 결과 등록은 실력매칭에만, 취소는 호출자가 잠근 예약 ID 범위에서 두 유형 모두 적용합니다.
+    if reservation_ids is None and "_" not in match_code:
+        return []
+    if reservation_ids is not None and not reservation_ids:
+        return []
+    category = 1 if "_" in match_code else 2
+    if reservation_ids is None:
+        scope = """AND CONCAT(r.g_code, '_', DATE_FORMAT(r.r_date, '%%Y%%m%%d'), '_',
+                    TIME_FORMAT(r.rs_time, '%%H%%i%%s'))=cr.c_r_r_code"""
+        params = (match_code,)
+    else:
+        placeholders = ','.join(['%s'] * len(reservation_ids))
+        scope = f"AND r.r_seq IN ({placeholders})"
+        params = (match_code, *reservation_ids)
+    cursor.execute(
+        f"""SELECT cr.c_id_seq, c.c_rating
+        FROM c_result_record cr INNER JOIN customer c ON c.c_id_seq=cr.c_id_seq
+        WHERE cr.c_r_r_code=%s AND cr.c_r_r_attendance=0
+          AND cr.c_r_r_rating_before IS NULL AND cr.c_r_r_rating_after IS NULL
+          AND EXISTS (SELECT 1 FROM reservation r
+              WHERE r.c_id_seq=cr.c_id_seq AND r.reservation_category={category}
+                {scope}
+                AND {NOT_CANCELED_CONDITION})
+        ORDER BY cr.c_id_seq FOR UPDATE""",
+        params,
+    )
+    changes = []
+    seen = set()
+    for row in cursor.fetchall():
+        cid = row["c_id_seq"]
+        if cid in seen:
+            continue
+        seen.add(cid)
+        before = row["c_rating"] if row["c_rating"] is not None else RATING_START
+        after = min(before, max(RATING_FLOOR, before - 30))
+        cursor.execute("UPDATE customer SET c_rating=%s WHERE c_id_seq=%s", (after, cid))
         cursor.execute(
-            """
-            UPDATE c_result_record AS r
-            INNER JOIN customer AS c ON c.c_id_seq = r.c_id_seq
-            SET r.c_r_r_rating_before = COALESCE(c.c_rating, %s),
-                r.c_r_r_rating_after = COALESCE(c.c_rating, %s)
-            WHERE r.c_r_r_code = %s
-                AND r.c_r_r_rating_before IS NULL AND r.c_r_r_rating_after IS NULL
-            """,
-            (RATING_START, RATING_START, match_code),
+            """UPDATE c_result_record SET c_r_r_rating_before=%s, c_r_r_rating_after=%s
+            WHERE c_r_r_code=%s AND c_id_seq=%s AND c_r_r_attendance=0
+              AND c_r_r_rating_before IS NULL AND c_r_r_rating_after IS NULL""",
+            (before, after, match_code, cid),
         )
+        changes.append(dict(c_id_seq=cid, team=None, result="노쇼", rating_before=before,
+                            rating_after=after, rating_change=after-before,
+                            tier_before=rating_tier(before), tier_after=rating_tier(after)))
     return changes
 
 
@@ -334,6 +375,162 @@ def validate_players(e_code: str, home: list, away: list):
 # 예: POST /match/team_result/manager01/3
 #     body {"home_score": 52, "away_score": 47,
 #           "home_players": [{"c_id_seq": "hong_02", "stats": {"P": 18, "T": 2}}], "away_players": [...]}
+# 수정 일 : 2026-10-30 / 작업자 : 양태건
+# 기존 결과 등록 검증·점수 계산을 공유하며 트랜잭션은 호출자가 관리합니다.
+def persist_team_match_result(cursor, m_id: str, team_code: int, body: TeamMatchResult):
+    # 1) 매니저 확인
+    cursor.execute("SELECT m_id, m_name FROM match_manager WHERE m_id = %s", (m_id,))
+    manager = cursor.fetchone()  # 1건만 받음 (없으면 None)
+    if manager is None:
+        raise HTTPException(status_code=404, detail="매니저 ID가 존재하지 않습니다.")
+
+    # 2) 팀 매칭 잠금 (FOR UPDATE : 같은 매칭 결과를 동시에 두 번 등록하지 못하게 함)
+    cursor.execute("SELECT team_code FROM team_match WHERE team_code = %s FOR UPDATE", (team_code,))
+    if cursor.fetchone() is None:
+        raise HTTPException(status_code=404, detail="존재하지 않는 팀 매칭입니다.")
+
+    # 3) 매칭 정보 + 구장대여 예약의 구장·담당 매니저 (팀 매칭 조회와 같은 기준)
+    cursor.execute(TEAM_MATCH_SELECT + " WHERE base.team_code = %s", (team_code,))
+    match = cursor.fetchone()
+    if match["rental_r_seq"] is None:
+        raise HTTPException(status_code=409, detail="연결된 구장대여 예약을 찾을 수 없어 담당 매니저를 확인할 수 없습니다.")
+    # 담당 매니저 = 구장대여 시간대에 배정표 기준으로 배정된 매니저
+    if match["rental_m_id"] != m_id:
+        raise HTTPException(status_code=403, detail="담당 매니저만 결과를 등록할 수 있습니다.")
+
+    # 4) 이미 결과가 등록됐는지 확인 (결과 확정 후에는 수정하지 않음 → 점수 두 번 반영 방지)
+    match_code = str(team_code)  # 팀 매치 경기코드 = team_code
+    cursor.execute("SELECT 1 FROM t_result_record WHERE t_r_r_m_code = %s LIMIT 1", (match_code,))
+    if cursor.fetchone() is not None:
+        raise HTTPException(status_code=409, detail="이미 결과가 등록된 팀 매칭입니다.")
+    if match["team_start"] is not None and match["team_start"] > datetime.now():
+        raise HTTPException(status_code=409, detail="아직 시작하지 않은 경기입니다.")
+
+    # 5) 종목 확인 (두 팀의 팀 종목이 같아야 함)
+    cursor.execute(
+        "SELECT tc.t_id, c.c_prefer_stock FROM team_create tc JOIN customer c ON c.c_id_seq=tc.c_id_seq WHERE tc.t_id IN (%s, %s)",
+        (match["home_t_id"], match["away_t_id"]),
+    )
+    # 수정 일 : 2026-10-30 / 작업자 : 양태건
+    # 개설일/폐지일인 c_category를 종목으로 해석하지 않습니다.
+    categories = {row["t_id"]: SPORT_BY_SEQUENCE.get(str(row["c_prefer_stock"])) for row in cursor.fetchall()}
+    e_code = categories.get(match["home_t_id"])
+    if e_code is None or categories.get(match["away_t_id"]) != e_code:
+        raise HTTPException(status_code=409, detail="두 팀의 종목을 확인할 수 없거나 서로 다릅니다.")
+
+    # 6) 참가 회원 확인 (형식 + 각 팀에 가입된 회원인지, 탈퇴 회원 제외)
+    validate_players(e_code, body.home_players, body.away_players)
+    for side, t_id, players in (("홈", match["home_t_id"], body.home_players),
+                                ("원정", match["away_t_id"], body.away_players)):
+        ids = [p.c_id_seq.strip() for p in players]
+        placeholders = ", ".join(["%s"] * len(ids))
+        cursor.execute(
+            f"""
+            SELECT tr.c_id_seq
+            FROM t_register AS tr
+            INNER JOIN customer AS c ON c.c_id_seq = tr.c_id_seq
+            WHERE tr.t_id = %s AND tr.c_id_seq IN ({placeholders})
+                AND c.c_deletdate IS NULL
+            """,
+            [t_id, *ids],
+        )
+        registered = {row["c_id_seq"] for row in cursor.fetchall()}
+        not_member = [c_id for c_id in ids if c_id not in registered]
+        if not_member:
+            raise HTTPException(status_code=422, detail=f"{side} 팀 회원이 아닙니다: {', '.join(not_member)}")
+
+    # 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
+    # 회원 기록에 반영 전 / 후 점수를 함께 저장하려고 순서 변경 : 팀 점수 → 결과 저장 → 회원 점수
+    def to_dicts(players: list) -> list:
+        return [{"c_id_seq": p.c_id_seq.strip(), "stats": p.stats} for p in players]
+
+    home_list, away_list = to_dicts(body.home_players), to_dicts(body.away_players)
+
+    # 7) 팀 점수 반영 (FIFA 방식, FOR UPDATE로 두 팀 점수 잠금)
+    cursor.execute(
+        "SELECT t_id, t_rating FROM team WHERE t_id IN (%s, %s) FOR UPDATE",
+        (match["home_t_id"], match["away_t_id"]),
+    )
+    team_ratings = {row["t_id"]: row["t_rating"] or RATING_START for row in cursor.fetchall()}
+    home_before = team_ratings[match["home_t_id"]]
+    away_before = team_ratings[match["away_t_id"]]
+    home_after = team_new_rating(home_before, away_before, result_value(body.home_score, body.away_score))
+    away_after = team_new_rating(away_before, home_before, result_value(body.away_score, body.home_score))
+    for t_id, rating in ((match["home_t_id"], home_after), (match["away_t_id"], away_after)):
+        cursor.execute("UPDATE team SET t_rating = %s WHERE t_id = %s", (rating, t_id))
+
+    # 8) 결과 저장
+    g_code = match["rental_g_code"]
+    sides = (
+        # (팀ID, 팀 이름, 회원 목록, 우리 점수, 상대 점수, 경기 후 팀 점수)
+        (match["home_t_id"], match["home_t_name"], home_list, body.home_score, body.away_score, home_after),
+        (match["away_t_id"], match["away_t_name"], away_list, body.away_score, body.home_score, away_after),
+    )
+    for t_id, t_name, players, my_score, opponent_score, team_after in sides:
+        score = f"{my_score}:{opponent_score}"  # 각 팀 기준 스코어 (우리팀:상대팀)
+        # 팀 스탯코드 = 참가 회원 스탯 합계
+        team_stats = {}
+        for player in players:
+            for key, value in player["stats"].items():
+                team_stats[key] = team_stats.get(key, 0) + value
+        cursor.execute(
+            """
+            INSERT INTO t_result_record
+                (m_id, g_code, t_id, t_r_r_m_code, t_r_r_date, e_code, t_r_r_statcode, t_r_r_score,
+                 t_r_r_rating_after)
+            VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s)
+            """,
+            (m_id, g_code, t_id, match_code, e_code, pack_statcode(e_code, team_stats), score, team_after),
+        )
+        # 회원별 결과 (출석 1, 부상 기록은 빈 값, 스코어는 회원이 속한 팀 기준)
+        for player in players:
+            statcode = pack_statcode(e_code, player["stats"])
+            if len(statcode) > STATCODE_MAX_LENGTH:
+                raise HTTPException(status_code=422, detail="기록 수가 저장 가능한 범위를 초과했습니다.")
+            # 수정 일 : 2026-10-30 / 작업자 : 양태건
+            # 출석·부상으로 생성된 회원 기록을 재사용하여 결과 행을 중복 생성하지 않습니다.
+            cursor.execute("SELECT c_r_r_seq FROM c_result_record WHERE c_r_r_code=%s AND c_id_seq=%s FOR UPDATE",
+                           (match_code, player["c_id_seq"]))
+            if cursor.fetchall():
+                cursor.execute("""UPDATE c_result_record SET m_id=%s,g_code=%s,c_r_r_team=%s,
+                    c_r_r_score=%s,c_r_r_date=NOW(),e_code=%s,c_r_r_statcode=%s,c_r_r_attendance=1
+                    WHERE c_r_r_code=%s AND c_id_seq=%s""",
+                    (m_id, g_code, t_name, score, e_code, statcode, match_code, player["c_id_seq"]))
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO c_result_record
+                        (m_id, g_code, c_id_seq, c_r_r_team, c_r_r_code, c_r_r_score, c_r_r_date,
+                         e_code, c_r_r_statcode, c_r_r_attendance, c_r_r_injury)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s, 1, '')
+                    """,
+                    (m_id, g_code, player["c_id_seq"], t_name, match_code, score, e_code, statcode),
+                )
+
+    # 9) 회원 점수 반영 (A = 홈, B = 원정) + 위에서 저장한 회원 기록에 반영 전 / 후 점수 저장
+    member_changes = apply_member_ratings(
+        cursor, e_code, home_list, away_list, body.home_score, body.away_score,
+        match_code=match_code,
+    )
+    return {
+        "result": "OK",
+        "team_code": team_code,                                          # 매치코드
+        "e_code": e_code,                                                # 종목코드
+        "score": f"{body.home_score}:{body.away_score}",                 # 스코어 (홈:원정)
+        "home_team": {
+            "t_id": match["home_t_id"], "t_name": match["home_t_name"],
+            "result": result_name(result_value(body.home_score, body.away_score)),
+            "rating_before": home_before, "rating_after": home_after,   # 팀 점수 변동
+        },
+        "away_team": {
+            "t_id": match["away_t_id"], "t_name": match["away_t_name"],
+            "result": result_name(result_value(body.away_score, body.home_score)),
+            "rating_before": away_before, "rating_after": away_after,
+        },
+        "members": member_changes,                                       # 회원별 점수·등급 변동
+    }
+
+
 @router.post("/team_result/{m_id}/{team_code}")
 def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
     connection = None
@@ -341,146 +538,9 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
         connection = connect()  # DB 연결
         # DictCursor : 결과를 (값, 값) 튜플 대신 {"컬럼명": 값} dict로 받음
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
-            # 1) 매니저 확인
-            cursor.execute("SELECT m_id, m_name FROM match_manager WHERE m_id = %s", (m_id,))
-            manager = cursor.fetchone()  # 1건만 받음 (없으면 None)
-            if manager is None:
-                raise HTTPException(status_code=404, detail="매니저 ID가 존재하지 않습니다.")
-
-            # 2) 팀 매칭 잠금 (FOR UPDATE : 같은 매칭 결과를 동시에 두 번 등록하지 못하게 함)
-            cursor.execute("SELECT team_code FROM team_match WHERE team_code = %s FOR UPDATE", (team_code,))
-            if cursor.fetchone() is None:
-                raise HTTPException(status_code=404, detail="존재하지 않는 팀 매칭입니다.")
-
-            # 3) 매칭 정보 + 구장대여 예약의 구장·담당 매니저 (팀 매칭 조회와 같은 기준)
-            cursor.execute(TEAM_MATCH_SELECT + " WHERE base.team_code = %s", (team_code,))
-            match = cursor.fetchone()
-            if match["rental_r_seq"] is None:
-                raise HTTPException(status_code=409, detail="연결된 구장대여 예약을 찾을 수 없어 담당 매니저를 확인할 수 없습니다.")
-            # 담당 매니저 = 구장대여 시간대에 배정표 기준으로 배정된 매니저
-            if match["rental_m_id"] != m_id:
-                raise HTTPException(status_code=403, detail="담당 매니저만 결과를 등록할 수 있습니다.")
-
-            # 4) 이미 결과가 등록됐는지 확인 (결과 확정 후에는 수정하지 않음 → 점수 두 번 반영 방지)
-            match_code = str(team_code)  # 팀 매치 경기코드 = team_code
-            cursor.execute("SELECT 1 FROM t_result_record WHERE t_r_r_m_code = %s LIMIT 1", (match_code,))
-            if cursor.fetchone() is not None:
-                raise HTTPException(status_code=409, detail="이미 결과가 등록된 팀 매칭입니다.")
-            if match["team_start"] is not None and match["team_start"] > datetime.now():
-                raise HTTPException(status_code=409, detail="아직 시작하지 않은 경기입니다.")
-
-            # 5) 종목 확인 (두 팀의 팀 종목이 같아야 함)
-            cursor.execute(
-                "SELECT t_id, c_category FROM team_create WHERE t_id IN (%s, %s)",
-                (match["home_t_id"], match["away_t_id"]),
-            )
-            categories = {row["t_id"]: SPORT_CODES.get((row["c_category"] or "").strip()) for row in cursor.fetchall()}
-            e_code = categories.get(match["home_t_id"])
-            if e_code is None or categories.get(match["away_t_id"]) != e_code:
-                raise HTTPException(status_code=409, detail="두 팀의 종목을 확인할 수 없거나 서로 다릅니다.")
-
-            # 6) 참가 회원 확인 (형식 + 각 팀에 가입된 회원인지, 탈퇴 회원 제외)
-            validate_players(e_code, body.home_players, body.away_players)
-            for side, t_id, players in (("홈", match["home_t_id"], body.home_players),
-                                        ("원정", match["away_t_id"], body.away_players)):
-                ids = [p.c_id_seq.strip() for p in players]
-                placeholders = ", ".join(["%s"] * len(ids))
-                cursor.execute(
-                    f"""
-                    SELECT tr.c_id_seq
-                    FROM t_register AS tr
-                    INNER JOIN customer AS c ON c.c_id_seq = tr.c_id_seq
-                    WHERE tr.t_id = %s AND tr.c_id_seq IN ({placeholders})
-                        AND c.c_deletdate IS NULL
-                    """,
-                    [t_id, *ids],
-                )
-                registered = {row["c_id_seq"] for row in cursor.fetchall()}
-                not_member = [c_id for c_id in ids if c_id not in registered]
-                if not_member:
-                    raise HTTPException(status_code=422, detail=f"{side} 팀 회원이 아닙니다: {', '.join(not_member)}")
-
-            # 중간 수정 작성자 - 신현진 / 수정일 2026.10.29
-            # 회원 기록에 반영 전 / 후 점수를 함께 저장하려고 순서 변경 : 팀 점수 → 결과 저장 → 회원 점수
-            def to_dicts(players: list) -> list:
-                return [{"c_id_seq": p.c_id_seq.strip(), "stats": p.stats} for p in players]
-
-            home_list, away_list = to_dicts(body.home_players), to_dicts(body.away_players)
-
-            # 7) 팀 점수 반영 (FIFA 방식, FOR UPDATE로 두 팀 점수 잠금)
-            cursor.execute(
-                "SELECT t_id, t_rating FROM team WHERE t_id IN (%s, %s) FOR UPDATE",
-                (match["home_t_id"], match["away_t_id"]),
-            )
-            team_ratings = {row["t_id"]: row["t_rating"] or RATING_START for row in cursor.fetchall()}
-            home_before = team_ratings[match["home_t_id"]]
-            away_before = team_ratings[match["away_t_id"]]
-            home_after = team_new_rating(home_before, away_before, result_value(body.home_score, body.away_score))
-            away_after = team_new_rating(away_before, home_before, result_value(body.away_score, body.home_score))
-            for t_id, rating in ((match["home_t_id"], home_after), (match["away_t_id"], away_after)):
-                cursor.execute("UPDATE team SET t_rating = %s WHERE t_id = %s", (rating, t_id))
-
-            # 8) 결과 저장
-            g_code = match["rental_g_code"]
-            sides = (
-                # (팀ID, 팀 이름, 회원 목록, 우리 점수, 상대 점수, 경기 후 팀 점수)
-                (match["home_t_id"], match["home_t_name"], home_list, body.home_score, body.away_score, home_after),
-                (match["away_t_id"], match["away_t_name"], away_list, body.away_score, body.home_score, away_after),
-            )
-            for t_id, t_name, players, my_score, opponent_score, team_after in sides:
-                score = f"{my_score}:{opponent_score}"  # 각 팀 기준 스코어 (우리팀:상대팀)
-                # 팀 스탯코드 = 참가 회원 스탯 합계
-                team_stats = {}
-                for player in players:
-                    for key, value in player["stats"].items():
-                        team_stats[key] = team_stats.get(key, 0) + value
-                cursor.execute(
-                    """
-                    INSERT INTO t_result_record
-                        (m_id, g_code, t_id, t_r_r_m_code, t_r_r_date, e_code, t_r_r_statcode, t_r_r_score,
-                         t_r_r_rating_after)
-                    VALUES (%s, %s, %s, %s, NOW(), %s, %s, %s, %s)
-                    """,
-                    (m_id, g_code, t_id, match_code, e_code, pack_statcode(e_code, team_stats), score, team_after),
-                )
-                # 회원별 결과 (출석 1, 부상 기록은 빈 값, 스코어는 회원이 속한 팀 기준)
-                for player in players:
-                    statcode = pack_statcode(e_code, player["stats"])
-                    if len(statcode) > STATCODE_MAX_LENGTH:
-                        raise HTTPException(status_code=422, detail="기록 수가 저장 가능한 범위를 초과했습니다.")
-                    cursor.execute(
-                        """
-                        INSERT INTO c_result_record
-                            (m_id, g_code, c_id_seq, c_r_r_team, c_r_r_code, c_r_r_score, c_r_r_date,
-                             e_code, c_r_r_statcode, c_r_r_attendance, c_r_r_injury)
-                        VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s, %s, 1, '')
-                        """,
-                        (m_id, g_code, player["c_id_seq"], t_name, match_code, score, e_code, statcode),
-                    )
-
-            # 9) 회원 점수 반영 (A = 홈, B = 원정) + 위에서 저장한 회원 기록에 반영 전 / 후 점수 저장
-            member_changes = apply_member_ratings(
-                cursor, e_code, home_list, away_list, body.home_score, body.away_score,
-                match_code=match_code,
-            )
-        connection.commit()  # 결과 저장 + 회원·팀 점수 반영을 한 번에 확정
-        return {
-            "result": "OK",
-            "team_code": team_code,                                          # 매치코드
-            "e_code": e_code,                                                # 종목코드
-            "score": f"{body.home_score}:{body.away_score}",                 # 스코어 (홈:원정)
-            "home_team": {
-                "t_id": match["home_t_id"], "t_name": match["home_t_name"],
-                "result": result_name(result_value(body.home_score, body.away_score)),
-                "rating_before": home_before, "rating_after": home_after,   # 팀 점수 변동
-            },
-            "away_team": {
-                "t_id": match["away_t_id"], "t_name": match["away_t_name"],
-                "result": result_name(result_value(body.away_score, body.home_score)),
-                "rating_before": away_before, "rating_after": away_after,
-            },
-            "members": member_changes,                                       # 회원별 점수·등급 변동
-        }
+            result = persist_team_match_result(cursor, m_id, team_code, body)
+        connection.commit()
+        return result
     except HTTPException:
         if connection is not None:
             connection.rollback()  # 위에서 만든 404/403/409/422는 되돌린 뒤 그대로 전달
@@ -519,3 +579,5 @@ def select_stat_keys():
     }
 
 # 최종 수정 일 : 2026-10-29
+
+# 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

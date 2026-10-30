@@ -1,3 +1,5 @@
+import '../shared/async_screen_state.dart';
+
 // 수정 일 : 2026-10-27 / 작업자 : 양태건
 // 기존 품의 문서와 단계별 결재 기록을 구분하며 최종 판단은 서버가 수행합니다.
 import 'package:flutter/material.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../model/headquarters_model.dart';
 import '../../vm/headquarters_notifier.dart';
+import '../../vm/screen_state_notifier.dart';
 import 'admin_components.dart';
 import '../shared/admin_split_view.dart';
 import 'approval_writer.dart';
@@ -17,15 +20,41 @@ class ApprovalPanel extends ConsumerStatefulWidget {
   ConsumerState<ApprovalPanel> createState() => _ApprovalPanelState();
 }
 
-class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
-  int offset = 0;
-  int? selected;
+class _ApprovalPanelState extends ConsumerState<ApprovalPanel>
+    with AsyncScreenState<ApprovalPanel> {
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 화면별 AsyncNotifier로 선택·작성 상태를 분리합니다.
+  @override
+  Map<String, Object?> initialScreenValues() => {'offset': 0, 'selected': null};
+  @override
+  Map<String, Object?> copyScreenValues(Map<String, Object?> values) => {
+    ...values,
+  };
+
+  int get offset => screenValue<int>('offset');
+  set offset(int value) => setScreenValue('offset', value);
+  int? get selected => screenValue<int?>('selected');
+  set selected(int? value) => setScreenValue('selected', value);
+  // 수정 일 : 2026-10-30 / 작업자 : 양태건
+  // 결재 행의 처리자가 아니라 원문 작성자로 본인 품의를 구분합니다.
+  bool ownDocument(Object? content) =>
+      adminDocument(adminDocument(content)['작성자'])['h_id'] == widget.staffId;
+
+  @override
+  void didUpdateWidget(covariant ApprovalPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.staffId != widget.staffId) {
+      resetScreenScope();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    watchScreen();
     if (widget.write) return ApprovalWriter(staffId: widget.staffId);
     return AdminSplitView(
       selected: selected != null,
-      onBack: () => setState(() => selected = null),
+      onBack: () => updateScreen(() => selected = null),
       list: AdminData(
         staffId: widget.staffId,
         path: '/approval/requests?limit=50&offset=$offset',
@@ -42,7 +71,7 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
               for (final row in p.rows)
                 InkWell(
                   onTap: () =>
-                      setState(() => selected = adminInt(row['m_code'])),
+                      updateScreen(() => selected = adminInt(row['m_code'])),
                   child: AdminCard(
                     child: ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -62,13 +91,13 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
                   TextButton(
                     onPressed: offset == 0
                         ? null
-                        : () => setState(() => offset -= 50),
+                        : () => updateScreen(() => offset -= 50),
                     child: const Text('이전'),
                   ),
                   Text('${offset ~/ 50 + 1}페이지'),
                   TextButton(
                     onPressed: p.rows.length == 50
-                        ? () => setState(() => offset += 50)
+                        ? () => updateScreen(() => offset += 50)
                         : null,
                     child: const Text('다음'),
                   ),
@@ -100,7 +129,7 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: () => setState(() => selected = null),
+                        onPressed: () => updateScreen(() => selected = null),
                         icon: const Icon(Icons.arrow_back),
                         label: const Text('품의 내역으로'),
                       ),
@@ -148,7 +177,11 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
                         ],
                       ),
                     ),
-                    if (latest['a_state'] == '심사중' && document.isNotEmpty)
+                    // 수정 일 : 2026-10-30 / 작업자 : 양태건
+                    // 본인 작성 문서는 열람하되 승인·반려 동작은 표시하지 않습니다.
+                    if (latest['a_state'] == '심사중' &&
+                        document.isNotEmpty &&
+                        !ownDocument(r['m_content']))
                       AdminCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -208,38 +241,50 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
           .join('\n'),
   });
   Future<void> _sign(bool approve) async {
-    var input = '';
+    final scope = ScreenStateScope(
+      () => {'input': ''},
+      (values) => {...values},
+    );
     final form = GlobalKey<FormState>();
     final comment = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(approve ? '품의 승인' : '품의 반려'),
-        content: Form(
-          key: form,
-          child: TextFormField(
-            onChanged: (value) => input = value,
-            maxLength: 100,
-            decoration: InputDecoration(
-              labelText: approve ? '의견 (선택)' : '반려 사유',
+      builder: (context) => Consumer(
+        builder: (context, dialogRef, _) {
+          final input =
+              dialogRef.watch(screenStateProvider(scope)).requireValue['input']
+                  as String;
+          return AlertDialog(
+            title: Text(approve ? '품의 승인' : '품의 반려'),
+            content: Form(
+              key: form,
+              child: TextFormField(
+                onChanged: (value) => dialogRef
+                    .read(screenStateProvider(scope).notifier)
+                    .setValue('input', value),
+                maxLength: 100,
+                decoration: InputDecoration(
+                  labelText: approve ? '의견 (선택)' : '반려 사유',
+                ),
+                validator: (v) =>
+                    !approve && v!.trim().isEmpty ? '반려 사유를 입력해 주세요.' : null,
+              ),
             ),
-            validator: (v) =>
-                !approve && v!.trim().isEmpty ? '반려 사유를 입력해 주세요.' : null,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (form.currentState!.validate()) {
-                Navigator.pop(context, input.trim());
-              }
-            },
-            child: const Text('확인'),
-          ),
-        ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (form.currentState!.validate()) {
+                    Navigator.pop(context, input.trim());
+                  }
+                },
+                child: const Text('확인'),
+              ),
+            ],
+          );
+        },
       ),
     );
     if (comment == null || !mounted) return;
@@ -252,3 +297,7 @@ class _ApprovalPanelState extends ConsumerState<ApprovalPanel> {
 // 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
 
 // 최종 수정 일 : 2026-10-28 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

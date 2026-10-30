@@ -32,14 +32,16 @@ final loginClientProvider = Provider<http.Client>((ref) {
   return client;
 });
 
-final loginProvider =
-    NotifierProvider<LoginNotifier, AsyncValue<StaffSession?>>(
-      LoginNotifier.new,
-    );
+final loginProvider = AsyncNotifierProvider<LoginNotifier, StaffSession?>(
+  LoginNotifier.new,
+);
 
-class LoginNotifier extends Notifier<AsyncValue<StaffSession?>> {
+// 수정 일 : 2026-10-30 / 작업자 : 양태건
+// 로그인도 AsyncNotifier가 로딩·세션·오류를 일관되게 소유합니다.
+class LoginNotifier extends AsyncNotifier<StaffSession?> {
+  int requestVersion = 0;
   @override
-  AsyncValue<StaffSession?> build() => const AsyncData(null);
+  StaffSession? build() => null;
 
   // DB 환경변수는 앱에 포함하지 않습니다. API 주소만 빌드 인자로 전달합니다.
   static const baseUrl = String.fromEnvironment(
@@ -102,11 +104,13 @@ class LoginNotifier extends Notifier<AsyncValue<StaffSession?>> {
 
   Future<void> login(String id, String password) async {
     if (state.isLoading) return;
+    final version = ++requestVersion;
     state = const AsyncLoading();
     try {
       final results = await Future.wait([
         for (final role in LoginRole.values) _authenticate(role, id, password),
       ]);
+      if (!ref.mounted || version != requestVersion) return;
       final sessions = results.whereType<StaffSession>().toList();
       if (sessions.isEmpty) {
         throw Exception('아이디 또는 비밀번호가 올바르지 않습니다.');
@@ -116,16 +120,24 @@ class LoginNotifier extends Notifier<AsyncValue<StaffSession?>> {
       }
       state = AsyncData(sessions.single);
     } on TimeoutException catch (error, stack) {
+      if (!ref.mounted || version != requestVersion) return;
       state = AsyncError(Exception('응답 시간이 초과되었습니다. 다시 시도해 주세요.'), stack);
     } on http.ClientException catch (error, stack) {
+      if (!ref.mounted || version != requestVersion) return;
       state = AsyncError(Exception('서버 연결을 확인해 주세요.'), stack);
     } catch (error, stack) {
+      if (!ref.mounted || version != requestVersion) return;
       state = AsyncError(error, stack);
     }
   }
 
-  void reset() => state = const AsyncData(null);
+  void reset() {
+    requestVersion++;
+    state = const AsyncData(null);
+  }
 }
 // 최종 수정일 : 2026-10-24
 
 // [수정 끝]
+
+// 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
