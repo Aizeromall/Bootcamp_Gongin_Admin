@@ -6,7 +6,7 @@ from database import connect
 from ..match.manager_session import verify_headquarters_token
 
 
-def require_headquarters(authorization: str = Header(default="")) -> str:
+def require_headquarters(authorization: str = Header(default="", description="본사 직원 로그인 토큰(Bearer 토큰)")) -> str:
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "본사 계정으로 다시 로그인해 주세요.")
     staff_id = verify_headquarters_token(authorization[7:])

@@ -26,7 +26,7 @@ import logging
 from typing import Optional
 
 import pymysql
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 
@@ -204,7 +204,11 @@ def team_to_dict(row: dict, stats: dict) -> dict:
 # 예: /management/teams
 #     /management/teams?keyword=빅맨즈
 #     /management/teams?category=농구
-@router.get("/teams")
+@router.get(
+    "/teams", summary="팀 목록 조회",
+    description="팀 목록과 팀별 전적·등급을 조회합니다. 팀 이름·팀장 이름과 종목으로 필터링할 수 있습니다.",
+    responses={500: {"description": "서버 내부 오류"}},
+)
 def select_teams(
     keyword: Optional[str] = Query(None, description="팀 이름 또는 팀장 이름 검색"),
     category: Optional[str] = Query(None, description="종목 (축구, 배구, 농구, 야구)"),
@@ -252,9 +256,13 @@ def select_teams(
 # 주의: "/teams" 보다 아래에 있어야 하며, 주소의 t_id로 팀 1개만 조회
 # 예: /management/teams/5
 #     /management/teams/5?recent_limit=2
-@router.get("/teams/{t_id}")
+@router.get(
+    "/teams/{t_id}", summary="팀 상세 조회",
+    description="팀 한 곳의 상세 정보와 최근 경기 결과를 조회합니다.",
+    responses={404: {"description": "존재하지 않는 팀"}, 500: {"description": "서버 내부 오류"}},
+)
 def select_team(
-    t_id: int,
+    t_id: int = Path(..., description="팀 번호"),
     # ge=1, le=20 : 1~20 밖의 값이 오면 FastAPI가 자동으로 422 에러 처리
     recent_limit: int = Query(5, ge=1, le=20, description="최근 경기 결과 개수"),
 ):

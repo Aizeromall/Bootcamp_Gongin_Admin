@@ -113,7 +113,7 @@ app.include_router(insert_banner_image_router) # 배너 이미지 등록 (/image
 app.include_router(select_banner_image_router) # 배너 이미지 선택 (/images/banner-select)
 
 
-@app.get("/health", tags=["Health"])
+@app.get("/health", tags=["Health"], summary="서버 상태 확인", description="관리자 API 서버가 실행 중인지 확인합니다.")
 def health() -> dict[str, str]:
     """서버 상태를 반환합니다."""
 

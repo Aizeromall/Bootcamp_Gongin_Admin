@@ -87,7 +87,7 @@ def list_banner_images():
     return {"results": rows}
 
 
-@router.get("/files/{b_image}", summary="배너 이미지 파일 보기")
+@router.get("/files/{b_image}", summary="배너 이미지 파일 보기", description="저장된 배너 이미지 파일을 반환합니다. 정해진 파일명 형식만 허용합니다.")
 def banner_file(b_image: str = ApiPath(..., max_length=255, description="저장된 이미지 파일명")):
     # 정해진 파일명 형식만 허용해 '../' 같은 경로 조작을 막습니다.
     if re.fullmatch(FILENAME_PATTERN, b_image) is None:

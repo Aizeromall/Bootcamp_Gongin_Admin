@@ -10,11 +10,15 @@ router = APIRouter()
 # 답변은 해당 문의 행(원글 또는 추가 문의)의 inquiry_detail, i_answer_date, h_id에 저장
 # i_state: '0' = 답변 대기, '1' = 답변 완료
 # h_id: 답변 작성자(본사 직원 ID)
-@router.post("")
+@router.post(
+    "",
+    summary="문의 답변 등록",
+    description="본사 직원이 문의에 답변을 등록하고 답변 완료 상태로 바꿉니다. 이미 답변된 문의에는 다시 답변할 수 없습니다. 처리 실패는 HTTP 200과 result가 Error인 응답으로 반환됩니다.",
+)
 async def answer_inquiry(
-    i_seq: int = Form(...),
-    h_id: str = Form(...),
-    inquiry_detail: str = Form(...),
+    i_seq: int = Form(..., description="답변할 문의 번호"),
+    h_id: str = Form(..., description="답변 작성 본사 직원 아이디"),
+    inquiry_detail: str = Form(..., description="답변 내용"),
 ):
     conn = None
 

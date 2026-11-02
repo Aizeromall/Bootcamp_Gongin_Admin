@@ -82,7 +82,7 @@ def photos(g_code: int | None = Query(None, ge=1, description="구장 번호")):
         return {"results": cursor.fetchall()}
 
 
-@router.get("/files/{s_image}", summary="첨부 사진 파일 보기")
+@router.get("/files/{s_image}", summary="첨부 사진 파일 보기", description="업로드한 구장 사진 파일을 반환합니다. 정해진 파일명 형식만 허용합니다.")
 def photo_file(s_image: str = ApiPath(..., max_length=255, description="업로드한 사진 파일명")):
     import re
     if re.fullmatch(r"[0-9a-f]{16}_[0-9a-f]{32}[.](jpg|png|webp)", s_image) is None:

@@ -39,10 +39,10 @@ import logging
 import math
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Annotated, Optional
 
 import pymysql
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
@@ -531,8 +531,22 @@ def persist_team_match_result(cursor, m_id: str, team_code: int, body: TeamMatch
     }
 
 
-@router.post("/team_result/{m_id}/{team_code}")
-def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
+@router.post(
+    "/team_result/{m_id}/{team_code}", summary="팀 매칭 결과 등록",
+    description="담당 매니저가 시작된 팀 매칭의 최종 점수와 참가 회원별 스탯을 등록합니다. 결과에 따라 팀과 회원의 점수·등급 변동이 함께 반영됩니다.",
+    responses={
+        403: {"description": "담당 매니저가 아님"},
+        404: {"description": "매니저, 팀 매칭 또는 회원 없음"},
+        409: {"description": "이미 결과가 등록됐거나 아직 시작하지 않은 경기, 구장대여 예약·종목 확인 불가"},
+        422: {"description": "종목, 회원, 스탯 값 검증 실패"},
+        500: {"description": "팀 매치 결과 저장 실패"},
+    },
+)
+def insert_team_match_result(
+    m_id: Annotated[str, Path(description="매니저 아이디")],
+    team_code: Annotated[int, Path(description="팀 매칭 경기 코드")],
+    body: TeamMatchResult,
+):
     connection = None
     try:
         connection = connect()  # DB 연결
@@ -562,7 +576,10 @@ def insert_team_match_result(m_id: str, team_code: int, body: TeamMatchResult):
 
 # 종목별 스탯 키·가중치 표 (앱의 기록 입력 버튼·설명 화면용)
 # 예: /match/rating/stat_keys
-@router.get("/rating/stat_keys")
+@router.get(
+    "/rating/stat_keys", summary="종목별 스탯 키·가중치 조회",
+    description="종목별 스탯 키, 이름, 가중치 표를 조회합니다. 기록 입력 버튼과 설명 화면에 사용합니다.",
+)
 def select_stat_keys():
     return {
         "sports": {

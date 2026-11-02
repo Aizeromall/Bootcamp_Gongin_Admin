@@ -8,7 +8,7 @@
 import logging
 
 import pymysql
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
@@ -39,6 +39,8 @@ class StartReviewRequest(BaseModel):
 # 심의 시작: 신고 확인 → 본사 직원 확인 → 접수 상태일 때만 h_id 저장
 @router.post(
     "/{r_seq}",
+    summary="신고 심의 시작",
+    description="접수된 신고에 대해 본사 직원이 심의를 시작합니다. 신고와 본사 직원을 확인한 뒤 접수 상태일 때만 담당 직원 아이디를 저장합니다.",
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "존재하지 않는 신고 번호 또는 본사 직원 아이디"},
         status.HTTP_409_CONFLICT: {"description": "이미 심의가 시작되었거나 처리가 끝난 신고"},
@@ -46,7 +48,7 @@ class StartReviewRequest(BaseModel):
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "심의 시작 실패"},
     },
 )
-def start_review(r_seq: int, payload: StartReviewRequest) -> dict:
+def start_review(r_seq: int = Path(..., description="신고 번호"), payload: StartReviewRequest = Body(...)) -> dict:
     connection = None
     try:
         connection = connect()

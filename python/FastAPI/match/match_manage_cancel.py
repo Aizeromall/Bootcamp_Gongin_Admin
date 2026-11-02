@@ -23,10 +23,10 @@
 # 취소하면 해당 경기에 예약된 회원 전체가 한 번에 취소되고, 결제 내역(pay)은 삭제 (환불 처리)
 import logging
 from datetime import date, timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
 import pymysql
-from fastapi import APIRouter, HTTPException, Query, Header
+from fastapi import APIRouter, HTTPException, Path, Query, Header
 from pydantic import BaseModel, Field
 
 # 수정 일 : 2026-10-30 / 작업자 : 양태건
@@ -112,9 +112,22 @@ def check_manager(cursor, m_id: str) -> dict:
 # 경기 매칭 취소 (매니저)
 # 예: PATCH /match/manage/cancel/manager01
 #     body {"g_code": "G001", "r_date": "2026-10-25", "rs_time": "08:00", "r_c_category": 2}
-@router.patch("/manage/cancel/{m_id}")
+@router.patch(
+    "/manage/cancel/{m_id}", summary="매니저 경기 취소",
+    description="매니저가 담당 구장의 경기를 취소합니다. 취소 사유는 1 시설 문제, 2 우천·기상악화, 3 노쇼 및 환불이며, 팀 매칭을 취소할 때는 로그인한 담당자와 요청 아이디가 같아야 합니다.",
+    responses={
+        403: {"description": "담당 구장 또는 담당 팀 매칭이 아님"},
+        404: {"description": "매니저, 구장, 팀 매칭 또는 취소할 예약 없음"},
+        409: {"description": "이미 지난 경기이거나 시작·결과 등록된 경기, 노쇼 처리 대상 없음"},
+        500: {"description": "매칭 취소 중 서버 오류"},
+    },
+)
 @operations.serialized
-def cancel_match(m_id: str, cancel: MatchCancel, authorization: str = Header(default="")):
+def cancel_match(
+    m_id: Annotated[str, Path(description="매니저 아이디")],
+    cancel: MatchCancel,
+    authorization: str = Header(default="", description="매니저 로그인 토큰(Bearer 토큰)"),
+):
     # 팀매칭 확장 경로는 로그인한 담당자와 요청 ID를 모두 검증합니다.
     if cancel.team_code is not None and require_manager(authorization) != m_id:
         raise HTTPException(403, "로그인한 담당자의 경기만 취소할 수 있습니다.")
@@ -355,14 +368,21 @@ def canceled_by_kind(cursor, m_id, kind, e_code=None, reason=None):
     return result
 
 
-@router.get("/manage/cancel/{m_id}")
+@router.get(
+    "/manage/cancel/{m_id}", summary="매니저 취소 경기 조회",
+    description="로그인한 매니저가 취소한 경기 내역을 조회합니다. 취소 사유, 경기 종류, 종목으로 필터링할 수 있습니다.",
+    responses={
+        403: {"description": "로그인한 매니저의 취소 내역이 아님"},
+        500: {"description": "취소 경기 조회 실패"},
+    },
+)
 def select_canceled_matches(
-    m_id: str,
+    m_id: Annotated[str, Path(description="매니저 아이디")],
     # ge=1, le=3 : 1~3 밖의 값이 오면 FastAPI가 자동으로 422 에러 처리
     r_c_category: int | None = Query(None, ge=1, le=3, description="1 시설 문제 / 2 우천·기상악화 / 3 노쇼 및 환불"),
-    kind: Literal['pickup', 'team'] | None = None,
-    e_code: Literal['SOCCER', 'BASKETBALL', 'BASEBALL', 'VOLLEYBALL'] | None = None,
-    authorization: str = Header(default=""),
+    kind: Literal['pickup', 'team'] | None = Query(None, description="경기 종류(pickup: 개인 매치, team: 팀 매치)"),
+    e_code: Literal['SOCCER', 'BASKETBALL', 'BASEBALL', 'VOLLEYBALL'] | None = Query(None, description="종목 코드"),
+    authorization: str = Header(default="", description="매니저 로그인 토큰(Bearer 토큰)"),
 ):
     if kind is not None and require_manager(authorization) != m_id:
         raise HTTPException(403, "로그인한 매니저의 취소 내역만 조회할 수 있습니다.")

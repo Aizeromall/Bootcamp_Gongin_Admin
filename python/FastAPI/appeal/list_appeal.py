@@ -39,6 +39,8 @@ STATE_FILTERS = list(STATE_TEXT.values())
 # 칩 건수는 "다른 필터를 적용한 상태"의 건수: 상태 건수는 종목 필터를, 종목 건수는 상태 필터를 반영
 @router.get(
     "",
+    summary="이의신청 목록 조회",
+    description="이의신청 목록을 상태와 종목으로 필터링해 조회합니다. 상태·종목별 건수도 함께 반환합니다.",
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "state 또는 sport 값이 올바르지 않음"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "이의신청 목록 조회 실패"},

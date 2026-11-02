@@ -2,7 +2,7 @@
 # 작업 일 : 2026-10-23
 # 담당 구장 예약 회원 출석 등록 API
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Path
 from pydantic import StrictBool
 from database import connect
 import pymysql
@@ -13,11 +13,20 @@ router = APIRouter(prefix="/match", tags=["출석 체크 경기 입력"])
 
 
 # 출석 체크 완료 시 회원별로 호출 (true: 출석, false: 결석)
-@router.post("/attendance/{m_id}/{r_seq}")
+@router.post(
+    "/attendance/{m_id}/{r_seq}", summary="출석 체크 등록",
+    description="매니저가 담당 구장의 예약 회원 출석 여부를 등록합니다. true는 출석, false는 결석입니다.",
+    responses={
+        403: {"description": "담당 구장의 예약이 아님"},
+        404: {"description": "예약 없음"},
+        409: {"description": "이미 출석 체크가 등록된 예약"},
+        500: {"description": "출석 등록 중 서버 오류"},
+    },
+)
 def attendance_check(
-    m_id: str,
-    r_seq: int,
-    c_r_r_attendance: StrictBool = Body(..., embed=True)
+    m_id: str = Path(..., description="매니저 아이디"),
+    r_seq: int = Path(..., description="예약 번호"),
+    c_r_r_attendance: StrictBool = Body(..., embed=True, description="출석 여부(true: 출석, false: 결석)")
 ):
     conn = None
 

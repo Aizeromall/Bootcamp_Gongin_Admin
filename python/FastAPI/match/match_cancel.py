@@ -21,7 +21,7 @@ import logging
 from datetime import date, timedelta
 
 import pymysql
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 
@@ -113,7 +113,11 @@ CANCEL_MATCH_GROUP_BY = """
 # 예: /match/cancel                     전체 구장 취소 내역
 #     /match/cancel?r_c_category=3      노쇼 및 환불로 취소된 경기만
 #     /match/cancel?g_code=1            1번 구장의 취소 내역만
-@router.get("/cancel")
+@router.get(
+    "/cancel", summary="취소 경기 목록 조회",
+    description="매니저가 취소한 경기 목록을 조회합니다. 취소 사유와 구장으로 필터링할 수 있습니다.",
+    responses={500: {"description": "구장 취소 내역 조회 실패"}},
+)
 def select_canceled_matches(
     # ge=1, le=3 : 1~3 밖의 값이 오면 FastAPI가 자동으로 422 에러 처리
     r_c_category: int | None = Query(None, ge=1, le=3, description="1 시설 문제 / 2 우천·기상악화 / 3 노쇼 및 환불"),
@@ -152,10 +156,14 @@ def select_canceled_matches(
 
 # 취소된 경기 1건의 예약 회원 목록 조회 (환불·노쇼 확인용)
 # 예: /match/cancel/1?r_date=2026-10-25&rs_time=08:00
-@router.get("/cancel/{g_code}")
+@router.get(
+    "/cancel/{g_code}", summary="취소 경기 예약 회원 조회",
+    description="취소된 경기 한 건의 예약 회원 목록을 조회합니다. 환불·노쇼 확인에 사용합니다.",
+    responses={404: {"description": "매니저가 취소한 경기가 아님"}, 500: {"description": "구장 취소 경기 조회 실패"}},
+)
 def select_canceled_match_detail(
-    g_code: str,
-    r_date: date,
+    g_code: str = Path(..., description="구장 코드"),
+    r_date: date = Query(..., description="경기 날짜 (예: 2026-10-25)"),
     # pattern : "08:00" 형식이 아니면 FastAPI가 자동으로 422 에러 처리
     rs_time: str = Query(pattern=r"^\d{2}:\d{2}$", description="경기 시작 시간 (예: 08:00)"),
 ):

@@ -65,9 +65,19 @@ def reverse_location(lat, lng):
         raise HTTPException(502, '주소를 불러오지 못했습니다. 잠시 후 다시 선택해 주세요.') from None
 
 
-@router.get('')
-def location(lat: float = Query(..., ge=-90, le=90),
-             lng: float = Query(..., ge=-180, le=180),
+@router.get(
+    '', summary="좌표로 구장 주소 조회",
+    description="지도에서 선택한 좌표(위도·경도)를 주소로 변환합니다.",
+    responses={
+        401: {"description": "본사 로그인 토큰 없음 또는 만료"},
+        403: {"description": "재직 중인 본사 직원이 아님"},
+        422: {"description": "주소를 찾지 못했거나 상세 주소가 없는 위치"},
+        502: {"description": "지도 주소 변환 요청 실패"},
+        503: {"description": "지도 주소 조회 설정 필요"},
+    },
+)
+def location(lat: float = Query(..., ge=-90, le=90, description="위도"),
+             lng: float = Query(..., ge=-180, le=180, description="경도"),
              staff_id: str = Depends(require_headquarters)):
     return reverse_location(lat, lng)
 # 최종 수정 일 : 2026-10-30 / 작업자 : 양태건
