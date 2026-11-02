@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 import pymysql
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, status
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 
@@ -21,12 +21,14 @@ logger = logging.getLogger(__name__)
 # 이의신청 상세 조회: a_seq로 이의신청 1건과 대상 제재를 함께 조회
 @router.get(
     "/{a_seq}",
+    summary="이의신청 상세 조회",
+    description="이의신청 한 건과 대상 제재 내용을 함께 조회합니다.",
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "존재하지 않는 이의신청 번호"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "이의신청 상세 조회 실패"},
     },
 )
-def detail_appeal(a_seq: int) -> dict:
+def detail_appeal(a_seq: int = Path(..., description="이의신청 번호")) -> dict:
     connection = None
     try:
         connection = connect()

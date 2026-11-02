@@ -2,7 +2,7 @@
 # 작업 일 : 2026-10-23
 # 경기 매니저 예약 경기 조회 API
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from database import connect
 import pymysql
 import traceback
@@ -15,8 +15,12 @@ router = APIRouter(
 
 
 # 담당 매니저가 배정된 구장의 예약 조회
-@router.get("/list/{m_id}")
-def get_match_list(m_id: str):
+@router.get(
+    "/list/{m_id}", summary="담당 구장 예약 목록 조회",
+    description="담당 매니저가 배정된 구장의 예약 목록을 조회합니다.",
+    responses={404: {"description": "매니저 아이디가 존재하지 않음"}, 500: {"description": "예약 목록 조회 실패"}},
+)
+def get_match_list(m_id: str = Path(..., description="매니저 아이디")):
 
     conn = None
 

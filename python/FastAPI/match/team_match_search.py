@@ -51,7 +51,7 @@ from datetime import datetime
 from typing import Optional
 
 import pymysql
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 # 팀 관리 API와 같은 기준으로 스코어·승패·팀 등급을 계산하기 위해 공용 함수를 가져옴
@@ -407,7 +407,11 @@ def team_match_to_dict(row: dict, results: dict, stats: dict) -> dict:
 #     /match/team_match?status=finished
 #     /match/team_match?t_id=5
 #     /match/team_match?keyword=빅맨즈
-@router.get("/team_match")
+@router.get(
+    "/team_match", summary="팀 매칭 목록 조회",
+    description="성사된 팀 매칭 목록을 조회합니다. 상태, 참여 팀, 팀 이름 검색어로 필터링할 수 있습니다.",
+    responses={500: {"description": "팀 매칭 조회 실패"}},
+)
 def select_team_matches(
     # pattern : 세 가지 상태 값이 아니면 FastAPI가 자동으로 422 에러 처리
     status: Optional[str] = Query(
@@ -464,8 +468,12 @@ def select_team_matches(
 # 팀 매칭 1건 상세 조회 (두 팀 정보·전적 + 경기 결과)
 # 주의: "/team_match" 보다 아래에 있어야 하며, 주소의 team_code로 매치 1건만 조회
 # 예: /match/team_match/3
-@router.get("/team_match/{team_code}")
-def select_team_match(team_code: int):
+@router.get(
+    "/team_match/{team_code}", summary="팀 매칭 상세 조회",
+    description="팀 매칭 경기 코드로 매치 한 건의 상세 정보를 조회합니다.",
+    responses={404: {"description": "존재하지 않는 팀 매칭"}, 500: {"description": "팀 매칭 조회 실패"}},
+)
+def select_team_match(team_code: int = Path(..., description="팀 매칭 경기 코드")):
     connection = None
     try:
         connection = connect()

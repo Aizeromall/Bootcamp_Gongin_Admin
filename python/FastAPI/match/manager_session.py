@@ -74,7 +74,7 @@ def verify_headquarters_token(token: str) -> str:
     return _verify_staff_token(token, 'headquarters', 'h_id')
 
 
-def require_manager(authorization: str = Header(default="")) -> str:
+def require_manager(authorization: str = Header(default="", description="매니저 로그인 토큰(Bearer 토큰)")) -> str:
     if not authorization.startswith("Bearer "):
         raise HTTPException(401, "다시 로그인해 주세요.")
     manager_id = verify_manager_token(authorization[7:])

@@ -11,10 +11,10 @@ import re
 import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
-from typing import Literal
+from typing import Annotated, Literal
 
 import pymysql
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from database import connect
@@ -914,7 +914,11 @@ def mutate(cursor, record, state, command):
 # 작업자 : 양태건
 # 수정일 : 2026-10-26
 # [수정 시작] 목록·상세·저장 경로에서 삭제된 테이블 참조를 모두 제거합니다.
-@router.get("")
+@router.get(
+    "", summary="경기 운영 목록 조회",
+    description="로그인한 매니저가 진행할 수 있는 경기 운영 목록을 조회합니다. 상태에 따라 내 매치와 지난 매치로 구분할 수 있습니다.",
+    responses={401: {"description": "매니저 로그인 토큰 없음 또는 만료"}, 403: {"description": "매니저 부서 담당자가 아님"}},
+)
 @serialized
 def match_list(manager_id: str = Depends(require_manager)):
     conn = connect()
@@ -982,9 +986,18 @@ def match_list(manager_id: str = Depends(require_manager)):
         conn.close()
 
 
-@router.get("/{anchor}")
+@router.get(
+    "/{anchor}", summary="경기 운영 상세 조회",
+    description="예약 번호(anchor)로 경기 운영 상세를 조회합니다. 조회하면 서버 메모리에 진행 상태가 생성되거나 갱신될 수 있습니다.",
+    responses={
+        401: {"description": "매니저 로그인 토큰 없음 또는 만료"},
+        403: {"description": "배정된 매니저의 경기가 아님"},
+        404: {"description": "경기를 찾을 수 없음"},
+        409: {"description": "진행할 수 없는 예약 또는 경기 상태"},
+    },
+)
 @serialized
-def match_detail(anchor: int, manager_id: str = Depends(require_manager)):
+def match_detail(anchor: int = Path(..., description="경기의 예약 번호"), manager_id: str = Depends(require_manager)):
     conn = connect()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
@@ -999,10 +1012,23 @@ def match_detail(anchor: int, manager_id: str = Depends(require_manager)):
         conn.close()
 
 
-@router.post("/{anchor}")
+@router.post(
+    "/{anchor}", summary="경기 운영 명령 실행",
+    description="경기에 출석, 팀 설정, 시작, 일시정지, 기록, 부상, 종료 등의 명령을 실행하고 갱신된 상세를 반환합니다. 요청의 version이 서버 상태와 다르면 충돌로 처리됩니다.",
+    responses={
+        401: {"description": "매니저 로그인 토큰 없음 또는 만료"},
+        403: {"description": "배정된 매니저의 경기가 아님"},
+        404: {"description": "경기를 찾을 수 없음"},
+        409: {"description": "현재 경기 상태에서 허용되지 않는 명령 또는 버전 충돌"},
+        422: {"description": "명령 값 검증 실패"},
+        500: {"description": "경기 저장 중 오류"},
+    },
+)
 @serialized
 def match_command(
-    anchor: int, command: Command, manager_id: str = Depends(require_manager)
+    anchor: Annotated[int, Path(description="경기의 예약 번호")],
+    command: Command,
+    manager_id: str = Depends(require_manager),
 ):
     conn = connect()
     try:

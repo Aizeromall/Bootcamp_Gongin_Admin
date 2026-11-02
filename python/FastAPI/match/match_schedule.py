@@ -34,7 +34,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 import pymysql
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 
@@ -189,9 +189,13 @@ def slot_to_dict(rs_time: str, g_num, pickups: list, rental: Optional[dict], tea
 # 매니저 구장 일정 조회 (그날 담당하는 구장 × 시간대)
 # 예: /match/schedule/manager01?r_date=2026-10-30
 #     /match/schedule/manager01?r_date=2026-10-30&g_code=1
-@router.get("/schedule/{m_id}")
+@router.get(
+    "/schedule/{m_id}", summary="매니저 구장 일정 조회",
+    description="매니저가 담당하는 구장의 하루 시간대별 일정(대관·팀 매치·담당 매니저)을 조회합니다.",
+    responses={404: {"description": "매니저 아이디가 존재하지 않음"}, 500: {"description": "구장 일정 조회 실패"}},
+)
 def select_manager_schedule(
-    m_id: str,
+    m_id: str = Path(..., description="매니저 아이디"),
     r_date: date = Query(description="조회할 날짜 (예: 2026-10-30)"),
     g_code: Optional[int] = Query(None, description="담당 구장 중 1곳만 보기 (안 보내면 전체)"),
 ):

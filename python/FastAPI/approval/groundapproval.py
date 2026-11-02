@@ -148,7 +148,7 @@ def templates():
         return {"results": cursor.fetchall()}
 
 
-@router.get("/approvers", summary="품의 양식별 결재자 후보 조회")
+@router.get("/approvers", summary="품의 양식별 결재자 후보 조회", description="품의 양식 번호로 해당 양식의 결재자 후보를 조회합니다.")
 def approvers(m_code: int = Query(..., ge=1, description="기존 품의 양식 번호")):
     with database() as cursor:
         cursor.execute("SELECT m_content FROM memorandum WHERE m_code=%s", (m_code,))
@@ -355,7 +355,8 @@ def sign_request(
 
 @router.get("/requests", summary="품의 결재 기록 조회", description="인증 없이 기존 관계 행을 조회합니다. 같은 m_code의 결재가 순서대로 누적됩니다.")
 def requests(m_code: int | None = Query(None, ge=1, description="품의서 번호"),
-             limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
+             limit: int = Query(50, ge=1, le=100, description="한 번에 가져올 건수"),
+             offset: int = Query(0, ge=0, description="건너뛸 건수")):
     with database() as cursor:
         sql = "SELECT a.*,m.m_content,h.h_name FROM approval a JOIN memorandum m ON m.m_code=a.m_code JOIN headquarter h ON h.h_id=a.h_id"
         params = []
@@ -366,7 +367,7 @@ def requests(m_code: int | None = Query(None, ge=1, description="품의서 번�
         return {"results": cursor.fetchall()}
 
 
-@router.get("/requests/{m_code}", summary="품의서 및 전체 결재 기록 조회")
+@router.get("/requests/{m_code}", summary="품의서 및 전체 결재 기록 조회", description="품의서 번호로 품의서 내용과 전체 결재 기록을 조회합니다.")
 def request_detail(m_code: int = Path(..., ge=1, description="품의서 번호")):
     with database() as cursor:
         cursor.execute("SELECT m_code,m_content FROM memorandum WHERE m_code=%s", (m_code,))
@@ -463,7 +464,7 @@ def prepare_termination(cursor, employee, data):
             "c_treaty": contract["c_treaty"]}, contract["c_rentalfee"]
 
 
-@router.get("/grounds/managers", summary="매니저와 기존 근무 일정 조회")
+@router.get("/grounds/managers", summary="매니저와 기존 근무 일정 조회", description="재직 중인 매니저와 매니저별 기존 구장 배정(요일·시간) 일정을 조회합니다.")
 def manager_schedules():
     with database() as cursor:
         cursor.execute("SELECT m_id,m_name,m_workplace FROM match_manager WHERE TRIM(m_department)='매니저' AND (m_resignationdate IS NULL OR m_resignationdate>CURRENT_DATE) ORDER BY m_name")
@@ -474,8 +475,8 @@ def manager_schedules():
         return {"results": managers}
 
 
-@router.get("/grounds/owners", summary="기존 소유주 검색")
-def owner_options(keyword: str = Query("", max_length=100)):
+@router.get("/grounds/owners", summary="기존 소유주 검색", description="소유주 이름 또는 전화번호로 기존 소유주를 검색합니다.")
+def owner_options(keyword: str = Query("", max_length=100, description="소유주 이름 또는 전화번호 검색어")):
     with database() as cursor:
         pattern = f"%{keyword.strip()}%"
         cursor.execute("SELECT o_seq,o_name,o_phone FROM owner WHERE o_name LIKE %s OR o_phone LIKE %s ORDER BY o_name,o_seq", (pattern, pattern))

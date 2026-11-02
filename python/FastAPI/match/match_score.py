@@ -2,7 +2,7 @@
 # 작업 일 : 2026-10-23
 # 담당 매니저의 회원 경기 결과기록 등록 API
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Path
 from database import connect
 import pymysql
 import traceback
@@ -12,14 +12,24 @@ router = APIRouter(prefix="/match", tags=["경기 결과기록"])
 
 
 # 예약번호로 회원을 확인하고 출석 완료된 회원의 경기 결과를 INSERT
-@router.post("/score/{m_id}/{r_seq}")
+@router.post(
+    "/score/{m_id}/{r_seq}", summary="경기 결과 기록",
+    description="출석이 완료된 회원의 경기 결과(팀, 종목, 스탯, 최종 스코어)를 등록합니다.",
+    responses={
+        400: {"description": "팀, 종목 코드, 스탯 코드, 최종 스코어 누락"},
+        403: {"description": "담당 구장의 회원이 아님"},
+        404: {"description": "예약 없음"},
+        409: {"description": "이미 결과가 등록됐거나 출석 처리가 먼저 필요함"},
+        500: {"description": "경기 기록 등록 중 서버 오류"},
+    },
+)
 def match_score(
-    m_id: str,
-    r_seq: int,
-    c_r_r_team: str = Body(..., min_length=1, max_length=50),
-    e_code: str = Body(..., min_length=1, max_length=20, examples=["SOCCER"]),
-    c_r_r_statcode: str = Body(..., min_length=1, max_length=50),
-    c_r_r_score: str = Body(..., min_length=1, max_length=20)
+    m_id: str = Path(..., description="매니저 아이디"),
+    r_seq: int = Path(..., description="예약 번호"),
+    c_r_r_team: str = Body(..., min_length=1, max_length=50, description="팀 이름"),
+    e_code: str = Body(..., min_length=1, max_length=20, examples=["SOCCER"], description="종목 코드"),
+    c_r_r_statcode: str = Body(..., min_length=1, max_length=50, description="스탯 코드"),
+    c_r_r_score: str = Body(..., min_length=1, max_length=20, description="최종 스코어")
 ):
     c_r_r_team = c_r_r_team.strip()
     e_code = e_code.strip()

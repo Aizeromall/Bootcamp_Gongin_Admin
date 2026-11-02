@@ -1,7 +1,7 @@
 ## 회원 및 매니저 관리
 ## 최초작업일 2026-10-22 김병재
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path, Query
 import pymysql
 
 from database import connect
@@ -63,8 +63,12 @@ def _sanction_history(curs, c_id_seq):
     return sorted(sanctions, key=lambda s: s["cs_date"], reverse=True)
 
 
-@router.get("/members")
-async def list_members(keyword: str = ""):
+@router.get(
+    "/members", summary="회원 목록 조회",
+    description="회원 목록을 조회합니다. 검색어를 지정하면 일치하는 회원만 반환합니다.",
+    responses={500: {"description": "서버 내부 오류"}},
+)
+async def list_members(keyword: str = Query("", description="회원 검색어")):
     conn = None
     try:
         conn = connect()
@@ -92,8 +96,12 @@ async def list_members(keyword: str = ""):
             conn.close()
 
 
-@router.get("/members/{c_id_seq}")
-async def get_member(c_id_seq: str):
+@router.get(
+    "/members/{c_id_seq}", summary="회원 상세 조회",
+    description="회원 한 명의 상세 정보를 조회합니다.",
+    responses={404: {"description": "회원 없음"}, 500: {"description": "서버 내부 오류"}},
+)
+async def get_member(c_id_seq: str = Path(..., description="회원 번호")):
     conn = None
     try:
         conn = connect()
@@ -137,8 +145,12 @@ async def get_member(c_id_seq: str):
             conn.close()
 
 
-@router.get("/managers")
-async def list_managers(keyword: str = ""):
+@router.get(
+    "/managers", summary="매니저 목록 조회",
+    description="매니저 목록을 조회합니다. 검색어를 지정하면 일치하는 매니저만 반환합니다.",
+    responses={500: {"description": "서버 내부 오류"}},
+)
+async def list_managers(keyword: str = Query("", description="매니저 검색어")):
     conn = None
     try:
         conn = connect()
@@ -169,8 +181,12 @@ async def list_managers(keyword: str = ""):
             conn.close()
 
 
-@router.get("/managers/{m_id}")
-async def get_manager(m_id: str):
+@router.get(
+    "/managers/{m_id}", summary="매니저 상세 조회",
+    description="매니저 한 명의 상세 정보를 조회합니다. 배정, 평가, 제재, 채용 이력이 함께 포함됩니다.",
+    responses={404: {"description": "매니저 없음"}, 500: {"description": "서버 내부 오류"}},
+)
+async def get_manager(m_id: str = Path(..., description="매니저 아이디")):
     conn = None
     try:
         conn = connect()

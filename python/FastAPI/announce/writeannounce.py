@@ -11,13 +11,22 @@ from .announce_common import Classification, Target, TARGETS, connect, database_
 router = APIRouter(prefix="/announce", tags=["공지 작성"])
 
 
-@router.post("/write", status_code=201)
+@router.post(
+    "/write", status_code=201, summary="공지 작성",
+    description="본사 직원이 공지를 작성합니다. 분류는 하나, 대상은 여러 개를 선택할 수 있으며 작성일은 서버의 한국 시간으로 저장합니다.",
+    responses={
+        400: {"description": "작성자, 제목, 내용이 공백뿐인 경우"},
+        404: {"description": "작성 직원 없음"},
+        500: {"description": "공지 DB 처리 실패"},
+        503: {"description": "DB 연결 실패"},
+    },
+)
 def write_announcement(
-    h_id: str = Body(..., min_length=1, max_length=50),
-    a_classify: Classification = Body(...),
-    a_title: str = Body(..., min_length=1, max_length=200),
-    a_detail: str = Body(..., min_length=1, max_length=16000),
-    a_target: list[Target] = Body(..., min_length=1, max_length=3),
+    h_id: str = Body(..., min_length=1, max_length=50, description="작성 본사 직원 아이디"),
+    a_classify: Classification = Body(..., description="공지 분류"),
+    a_title: str = Body(..., min_length=1, max_length=200, description="공지 제목"),
+    a_detail: str = Body(..., min_length=1, max_length=16000, description="공지 내용"),
+    a_target: list[Target] = Body(..., min_length=1, max_length=3, description="공지 대상 목록(복수 선택)"),
 ):
     # 문자열 공백만 입력한 요청은 거부하고, 중복 대상은 한 번만 저장합니다.
     h_id, a_title, a_detail = h_id.strip(), a_title.strip(), a_detail.strip()

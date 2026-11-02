@@ -203,14 +203,14 @@ def finalize_ground(cursor, m_code, document, history, actor_id):
                    (author["h_id"], owner_id, m_code, now().date(), record, treaty, history[-1]["a_price"]))
 
 
-@router.get("", summary="기존 계약 관계 이력 조회")
+@router.get("", summary="기존 계약 관계 이력 조회", description="구장 소유주와 담당 본사 직원이 연결된 기존 계약 관계 이력을 최신순으로 조회합니다.")
 def contracts():
     with database() as cursor:
         cursor.execute("SELECT c.*,o.o_name,h.h_name FROM contract c JOIN owner o ON o.o_seq=c.o_seq JOIN headquarter h ON h.h_id=c.h_id ORDER BY c.c_seq DESC")
         return {"results": cursor.fetchall()}
 
 
-@router.get("/{c_seq}", summary="기존 계약 관계 상세 조회")
+@router.get("/{c_seq}", summary="기존 계약 관계 상세 조회", description="계약 관계 번호로 계약 관계 한 건의 상세 정보를 조회합니다.")
 def contract(c_seq: int = Path(..., ge=1, description="계약 관계 번호")):
     with database() as cursor:
         cursor.execute("SELECT c.*,o.o_name,h.h_name FROM contract c JOIN owner o ON o.o_seq=c.o_seq JOIN headquarter h ON h.h_id=c.h_id WHERE c.c_seq=%s", (c_seq,))

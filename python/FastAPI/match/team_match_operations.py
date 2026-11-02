@@ -7,7 +7,9 @@ import logging
 import time
 
 import pymysql
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Path
 from database import connect
 from . import match_operations as operations
 from .manager_session import require_manager
@@ -166,15 +168,40 @@ def handle(code, manager_id, command=None):
         conn.close()
 
 
-@router.get('/{code}')
+@router.get(
+    '/{code}', summary="팀매칭 경기 운영 상세 조회",
+    description="팀매칭 경기 코드로 운영 상세를 조회합니다.",
+    responses={
+        401: {"description": "매니저 로그인 토큰 없음 또는 만료"},
+        403: {"description": "다른 담당자가 진행 중인 팀매칭"},
+        404: {"description": "담당하는 성사된 팀매칭이 아님"},
+        409: {"description": "진행할 수 없는 팀매칭 상태"},
+        500: {"description": "팀매칭 처리 실패"},
+    },
+)
 @operations.serialized
-def detail(code: int, manager_id: str = Depends(require_manager)):
+def detail(code: int = Path(..., description="팀매칭 경기 코드"), manager_id: str = Depends(require_manager)):
     return handle(code, manager_id)
 
 
-@router.post('/{code}')
+@router.post(
+    '/{code}', summary="팀매칭 경기 운영 명령 실행",
+    description="팀매칭 경기에 출석, 시작, 일시정지, 기록, 종료 등의 명령을 실행하고 갱신된 상세를 반환합니다.",
+    responses={
+        401: {"description": "매니저 로그인 토큰 없음 또는 만료"},
+        403: {"description": "다른 담당자가 진행 중인 팀매칭"},
+        404: {"description": "담당하는 성사된 팀매칭이 아님"},
+        409: {"description": "현재 상태에서 허용되지 않는 명령 또는 갱신 필요"},
+        422: {"description": "명령 값 검증 실패"},
+        500: {"description": "팀매칭 처리 실패"},
+    },
+)
 @operations.serialized
-def update(code: int, command: operations.Command, manager_id: str = Depends(require_manager)):
+def update(
+    code: Annotated[int, Path(description="팀매칭 경기 코드")],
+    command: operations.Command,
+    manager_id: str = Depends(require_manager),
+):
     return handle(code, manager_id, command)
 
 # 최종 수정 일 : 2026-10-30 / 작업자 : 양태건

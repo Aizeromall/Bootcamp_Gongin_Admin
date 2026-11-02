@@ -37,6 +37,8 @@ STATE_FILTERS = ["접수", "심의중", "처리완료", "기각"]
 # 신고가 많지 않아 전체를 읽어 서버에서 거르고 센다 (상태/종목은 SQL이 아닌 r_reason·c_result_record에서 계산되기 때문)
 @router.get(
     "",
+    summary="신고 목록 조회",
+    description="신고 목록을 처리 상태와 종목으로 필터링해 조회합니다. 상태·종목별 건수도 함께 반환합니다.",
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "state 또는 sport 값이 올바르지 않음"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "신고 내역 조회 실패"},

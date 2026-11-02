@@ -7,7 +7,7 @@ import logging
 from typing import Literal
 
 import pymysql
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from database import connect
 from .manager_session import require_manager
 from .match_result_insert import STAT_KEYS, RATING_START, rating_tier, unpack_statcode
@@ -170,15 +170,27 @@ def read_results(manager_id, code=None):
             conn.close()
 
 
-@router.get("/results")
-def results(kind: Literal["pickup", "team"] = Query(...), e_code: str | None = None, manager_id: str = Depends(require_manager)):
+@router.get(
+    "/results", summary="매니저 경기 결과 목록 조회",
+    description="로그인한 매니저가 등록한 경기 결과 목록을 조회합니다. 개인정보와 개인 스탯은 포함하지 않습니다.",
+    responses={401: {"description": "매니저 로그인 토큰 없음 또는 만료"}, 403: {"description": "매니저 부서 담당자가 아님"}, 500: {"description": "경기 결과 조회 실패"}},
+)
+def results(
+    kind: Literal["pickup", "team"] = Query(..., description="경기 종류(pickup: 개인 매치, team: 팀 매치)"),
+    e_code: str | None = Query(None, description="종목 코드 필터"),
+    manager_id: str = Depends(require_manager),
+):
     rows = [r for r in read_results(manager_id) if r["kind"] == kind and (e_code is None or r["e_code"] == e_code)]
     # 목록에는 개인정보·개인 스탯을 포함하지 않습니다.
     return {"results": [{k: v for k, v in row.items() if k not in {"sides", "team_summary"}} for row in rows]}
 
 
-@router.get("/results/{code}")
-def result_detail(code: str, manager_id: str = Depends(require_manager)):
+@router.get(
+    "/results/{code}", summary="매니저 경기 결과 상세 조회",
+    description="로그인한 매니저가 등록한 경기 결과 한 건의 상세 정보를 조회합니다.",
+    responses={401: {"description": "매니저 로그인 토큰 없음 또는 만료"}, 403: {"description": "매니저 부서 담당자가 아님"}, 404: {"description": "등록한 경기 결과 없음"}, 500: {"description": "경기 결과 조회 실패"}},
+)
+def result_detail(code: str = Path(..., description="경기 결과 코드"), manager_id: str = Depends(require_manager)):
     rows = read_results(manager_id, code)
     if not rows:
         raise HTTPException(404, "등록한 경기 결과가 없습니다.")
@@ -187,7 +199,11 @@ def result_detail(code: str, manager_id: str = Depends(require_manager)):
 # 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
 
 
-@router.get("/upcoming")
+@router.get(
+    "/upcoming", summary="예정 경기 조회",
+    description="로그인한 매니저의 오늘 이후 예정 경기를 조회합니다. 개인 매치 운영 경기와 배정된 팀 경기를 함께 반환합니다.",
+    responses={401: {"description": "매니저 로그인 토큰 없음 또는 만료"}, 403: {"description": "매니저 부서 담당자가 아님"}, 500: {"description": "예정 경기 조회 실패"}},
+)
 def upcoming(manager_id: str = Depends(require_manager)):
     """오늘 이후 모든 예정 경기. 기존 운영 조회와 배정표 기준 팀 경기만 읽습니다."""
     today = datetime.now(ZoneInfo("Asia/Seoul")).date()
@@ -219,8 +235,12 @@ def upcoming(manager_id: str = Depends(require_manager)):
 
 # 최종 수정 일 : 2026-10-29 / 작업자 : 양태건
 
-@router.get("/teams/{code}/roster")
-def team_roster(code: int, manager_id: str = Depends(require_manager)):
+@router.get(
+    "/teams/{code}/roster", summary="팀 경기 출전 명단 조회",
+    description="담당 팀 경기의 시간대 예약자 출전·출석 명단을 조회합니다.",
+    responses={401: {"description": "매니저 로그인 토큰 없음 또는 만료"}, 403: {"description": "매니저 부서 담당자가 아님"}, 404: {"description": "담당하는 팀 경기가 아님"}, 500: {"description": "팀 경기 명단 조회 실패"}},
+)
+def team_roster(code: int = Path(..., description="팀 경기 코드"), manager_id: str = Depends(require_manager)):
     """담당 팀 경기의 실제 시간대 예약자 출전·출석 명단."""
     conn = None
     try:

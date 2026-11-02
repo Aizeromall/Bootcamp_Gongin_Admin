@@ -43,7 +43,16 @@ class CreateEducationRequest(BaseModel):
         return value
 
 
-@router.post("/courses", status_code=201)
+@router.post(
+    "/courses", status_code=201, summary="교육 개설",
+    description="본사 직원이 교육을 개설하고 선택한 매니저들에게 교육 대상 기록을 배정합니다.",
+    responses={
+        401: {"description": "본사 로그인 토큰 없음 또는 만료"},
+        403: {"description": "재직 중인 본사 직원이 아님"},
+        422: {"description": "교육 내용 길이 초과 또는 배정할 수 없는 매니저 포함"},
+        500: {"description": "교육 개설 실패"},
+    },
+)
 def create_course(
     payload: CreateEducationRequest, staff_id: str = Depends(require_headquarters)
 ):

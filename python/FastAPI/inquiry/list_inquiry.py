@@ -1,7 +1,7 @@
 ## 문의 답변 및 관리
 ## 최초작업일 2026-10-23 김병재
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 import pymysql
 
 from database import connect
@@ -69,8 +69,12 @@ def attach_follow_ups(curs, rows):
 
 # 문의 목록 조회
 # i_state: '0' = 답변 대기, '1' = 답변 완료 (지정 시 원글 상태가 일치하는 것만)
-@router.get("")
-async def list_inquiry(i_state: str | None = None):
+@router.get(
+    "",
+    summary="문의 목록 조회",
+    description="문의 목록을 조회합니다. 답변 대기 문의가 먼저 나오며 추가 문의(follow_ups)를 함께 반환합니다. 실패는 HTTP 200과 result가 Error인 응답으로 반환됩니다.",
+)
+async def list_inquiry(i_state: str | None = Query(None, description="답변 상태 필터(0: 답변 대기, 1: 답변 완료)")):
 
     conn = None
 

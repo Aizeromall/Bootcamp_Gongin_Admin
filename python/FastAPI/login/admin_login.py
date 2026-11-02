@@ -83,11 +83,21 @@ def connect() -> pymysql.connections.Connection:
 # 2. 두 값의 공백을 제거
 # 3. Headquarter 테이블에서 일치하는 계정을 SELECT로 조회
 # 4. 조회 결과에 따라 성공 또는 오류 코드를 반환
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="본사 직원 로그인",
+    description="본사 직원 아이디와 비밀번호를 확인해 로그인합니다. 성공하면 직원 정보(이름·직급·부서)와 역할을 반환합니다.",
+    responses={
+        400: {"description": "아이디 또는 비밀번호가 비어 있음"},
+        401: {"description": "아이디 또는 비밀번호 불일치"},
+        500: {"description": "서버 설정 또는 로그인 처리 오류"},
+        503: {"description": "DB 연결 실패"},
+    },
+)
 def login_admin(
     # Body(...)는 필수 JSON 필드라는 뜻이며, max_length는 과도하게 긴 입력을 제한
-    h_id: str = Body(..., max_length=45),
-    h_pw: str = Body(..., max_length=128),
+    h_id: str = Body(..., max_length=45, description="본사 직원 아이디"),
+    h_pw: str = Body(..., max_length=128, description="본사 직원 비밀번호"),
 ) -> dict[str, str | None]:
     """Headquarter 테이블의 h_id와 h_pw가 일치하는 관리자를 로그인합니다."""
 

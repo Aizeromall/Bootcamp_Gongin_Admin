@@ -51,16 +51,26 @@ def _read_admin_announcements(sequence=None, classify=None, keyword="", limit=50
             connection.close()
 
 
-@router.get("")
+@router.get(
+    "", summary="본사 공지 목록 조회",
+    description="본사 대상 공지를 최신순으로 조회합니다. 분류와 제목·내용 검색어로 필터링할 수 있습니다.",
+    responses={500: {"description": "공지 DB 처리 실패"}, 503: {"description": "DB 연결 실패"}},
+)
 def admin_announcements(
-    a_classify: Classification | None = None, keyword: str = Query("", max_length=200),
-    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    a_classify: Classification | None = Query(None, description="공지 분류 필터"),
+    keyword: str = Query("", max_length=200, description="제목·내용 검색어"),
+    limit: int = Query(50, ge=1, le=100, description="한 번에 가져올 건수"),
+    offset: int = Query(0, ge=0, description="건너뛸 건수"),
 ):
     return _read_admin_announcements(classify=a_classify, keyword=keyword.strip(), limit=limit, offset=offset)
 
 
-@router.get("/{a_seq}")
-def admin_announcement(a_seq: int = Path(..., ge=1)):
+@router.get(
+    "/{a_seq}", summary="본사 공지 상세 조회",
+    description="본사 대상 공지 한 건의 제목, 내용, 작성자, 대상을 조회합니다.",
+    responses={404: {"description": "공지 없음 또는 본사 대상이 아닌 공지"}, 500: {"description": "공지 DB 처리 실패"}, 503: {"description": "DB 연결 실패"}},
+)
+def admin_announcement(a_seq: int = Path(..., ge=1, description="공지 번호")):
     return _read_admin_announcements(sequence=a_seq)
 
 # 최종 수정일 : 2026-10-27

@@ -37,6 +37,8 @@ TAG_FILTERS = ["유효", "소멸"]
 # 종목 칩 건수는 태그 필터를 반영, 태그 건수는 종목 필터를 반영
 @router.get(
     "",
+    summary="제재 목록 조회",
+    description="제재 목록을 종목과 태그(유효·소멸)로 필터링해 조회합니다. 제재별 이의신청 건수와 최근 이의신청 상태도 함께 반환합니다.",
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "sport 또는 tag 값이 올바르지 않음"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "제재 목록 조회 실패"},

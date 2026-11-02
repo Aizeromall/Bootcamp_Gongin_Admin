@@ -69,10 +69,20 @@ def connect() -> pymysql.connections.Connection:
 # 2. 두 값의 모든 공백을 제거합니다.
 # 3. match_manager 테이블에서 일치하는 계정을 SELECT로 조회합니다.
 # 4. 조회 결과에 따라 성공 또는 오류 코드를 반환합니다.
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="매니저 로그인",
+    description="매니저 아이디와 비밀번호를 확인해 로그인합니다. 성공하면 매니저 정보와 역할, 인증 토큰을 반환합니다.",
+    responses={
+        400: {"description": "아이디 또는 비밀번호가 비어 있음"},
+        401: {"description": "아이디 또는 비밀번호 불일치"},
+        500: {"description": "서버 설정 또는 로그인 처리 오류"},
+        503: {"description": "DB 연결 실패"},
+    },
+)
 def login_manager(
-    m_id: str = Body(..., max_length=45),
-    m_pw: str = Body(..., max_length=128),
+    m_id: str = Body(..., max_length=45, description="매니저 아이디"),
+    m_pw: str = Body(..., max_length=128, description="매니저 비밀번호"),
 ) -> dict[str, str]:
     """match_manager 테이블의 m_id와 m_pw가 일치하는 매니저를 로그인합니다."""
 

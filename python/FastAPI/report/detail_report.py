@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 
 import pymysql
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Path, status
 
 from database import connect  # 공용 DB 연결 함수 (python/database.py)
 
@@ -59,12 +59,14 @@ def fetch_target_history(cursor, r_person: str) -> dict:
 # 신고 상세 조회: r_seq로 신고 1건과 피신고자 이력을 함께 조회
 @router.get(
     "/{r_seq}",
+    summary="신고 상세 조회",
+    description="신고 한 건과 피신고자의 이력을 함께 조회합니다.",
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "존재하지 않는 신고 번호"},
         status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "신고 상세 조회 실패"},
     },
 )
-def detail_report(r_seq: int) -> dict:
+def detail_report(r_seq: int = Path(..., description="신고 번호")) -> dict:
     connection = None
     try:
         connection = connect()

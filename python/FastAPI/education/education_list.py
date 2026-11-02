@@ -11,7 +11,15 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.get("/courses")
+@router.get(
+    "/courses", summary="교육 목록 조회",
+    description="본사 직원이 개설된 교육 목록을 조회합니다.",
+    responses={
+        401: {"description": "본사 로그인 토큰 없음 또는 만료"},
+        403: {"description": "재직 중인 본사 직원이 아님"},
+        500: {"description": "교육 목록 조회 실패"},
+    },
+)
 def list_courses(staff_id: str = Depends(require_headquarters)):
     conn = connect()
     try:
@@ -32,7 +40,15 @@ def list_courses(staff_id: str = Depends(require_headquarters)):
         conn.close()
 
 
-@router.get("/managers")
+@router.get(
+    "/managers", summary="교육 대상 매니저 조회",
+    description="본사 직원이 교육을 배정할 수 있는 매니저 목록을 조회합니다.",
+    responses={
+        401: {"description": "본사 로그인 토큰 없음 또는 만료"},
+        403: {"description": "재직 중인 본사 직원이 아님"},
+        500: {"description": "교육 대상 매니저 조회 실패"},
+    },
+)
 def education_managers(staff_id: str = Depends(require_headquarters)):
     conn = connect()
     try:
