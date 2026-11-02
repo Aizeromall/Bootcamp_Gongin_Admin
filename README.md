@@ -1,17 +1,164 @@
 # bootcamp_project_gongin_admin_app
 
-A new Flutter project.
+공IN 중개사 **운영(관리자) 앱**입니다. 본사 직원과 경기매니저가 같은 앱에 로그인하고, 서버가 판단한 역할에 따라 본사 화면 또는 매니저 화면으로 들어갑니다.
 
-## Getting Started
+- Flutter 앱 : `lib/` (Riverpod 3 · `AsyncNotifier` 상태관리, 코드 생성 미사용)
+- FastAPI 서버 : `python/main.py`, 기능별 라우터 `python/FastAPI/`
+- 기능별 상세 문서 : `docs/`
 
-This project is a starting point for a Flutter application.
+## 전체 흐름
 
-A few resources to get you started if this is your first Flutter project:
+```text
+로그인 (본사 · 매니저 통합, 서버가 역할 판단)
+├─ 본사 직원
+│   ├─ 대시보드 (미처리 문의 · 신고 · 이의신청 · 교육 · 팀 집계)
+│   ├─ 회원 · 매니저 · 팀 관리
+│   ├─ 구장 조회 → 품의 · 결재 (신규 계약 · 재계약 · 해지 · 휴가, 지도 위치 · 사진)
+│   ├─ 공지 작성 · 배너 이미지
+│   ├─ 문의 답변 → 신고 심의 → 제재 · 이의신청 재심의
+│   ├─ 매니저 교육 (개설 · 이수)
+│   └─ 매치 관리 (담당자별 예약 · 팀 대 팀 매칭 · 취소 경기)
+└─ 경기매니저
+    ├─ 내 매치 (담당 구장 일정 · 예정 경기)
+    ├─ 경기 진행 (출석 → 팀 배정 → 기록 · 부상 → 결과 등록)
+    ├─ 결과 등록 → 회원 · 팀 등급 점수 반영
+    └─ 지난 매치 (완료 결과 · 점수 변동 · 담당 구장 취소)
+```
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+아래 기능 설명은 위 흐름 순서입니다. 각 제목의 날짜·작업자는 git 이력과 코드 주석(`작업자 :`) 기준입니다.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 1. 프로젝트 설정 · 모델 (2026-10-22 / 양태건, 신현진)
+
+- Flutter 관리자 앱 생성, 의존성(Riverpod·http 등)·환경 예시(`.env.example`)·model/view/vm 폴더 구성 (양태건).
+- `Customer`·`Ground`·`MatchManager`·`Headquarter` 모델 파일과 JSON 변환 작성 (신현진).
+
+## 2. 로그인 · 역할 분기 (2026-10-22 ~ 2026-10-26 / 최현준, 양태건)
+
+- `POST /admin/login`(본사), `POST /manager/login`(경기매니저) 로그인 API (2026-10-22 / 최현준).
+- 본사·매니저 운영 Front v1 : 로그인·역할 선택·대시보드·구장·문의·관리·매치 화면 골격 (2026-10-24 / 최현준).
+- 역할 선택 없이 두 로그인 API의 인증 결과로 화면을 결정하는 부서 기반 통합 로그인, 매니저 상세·문의 API 보정 (2026-10-26 / 양태건).
+- 매니저 토큰은 12시간 유효한 HMAC-SHA256 서명 토큰이며 DB에 저장하지 않습니다. 서버 재시작 시 기존 토큰이 무효화될 수 있습니다.
+
+## 3. 본사 대시보드 (2026-10-24 / 최현준, 2026-10-27 ~ 2026-10-28 / 양태건)
+
+- 미답변 문의, 신고 `pending_count`, 이의신청 `pending_count`, 교육 `required_pending`, 팀 `total`을 실제 API로 집계합니다. 집계 실패는 0건으로 바꾸지 않고 재시도를 제공합니다.
+- 처리할 일은 유형별 최대 3건을 보여 주고 해당 메뉴로 이동합니다. 매출·전체 경기 집계 API는 없어 표시하지 않습니다.
+- 관리자 목업(남색 사이드바·흰 카드·상태 배지)을 적용하고 넓은 화면은 목록/상세 분할, 작은 화면은 목록 선택·복귀 방식입니다 (양태건).
+
+## 4. 회원 · 매니저 · 팀 관리 (2026-10-22 / 김병재, 2026-10-27 / 신현진)
+
+- `GET /management/members`, `/management/members/{c_id_seq}`, `/management/managers`, `/management/managers/{m_id}` 회원·매니저 목록·상세 (2026-10-22 / 김병재).
+- `GET /management/teams`(팀명·팀장 검색, 종목 필터), `/management/teams/{t_id}`(팀원·전적·최근 결과) 팀 관리 조회 (2026-10-27 / 신현진).
+- 매니저 평가는 `/management/managers/{m_id}`의 `evaluates` 이력을 표시합니다. 평가 작성 API는 없습니다.
+
+## 5. 구장 조회 (2026-10-23 ~ 2026-10-26 / 신현진, 김병재, 양태건)
+
+- 본사 구장 조회 vm과 flutter_riverpod 설정 (2026-10-23 / 신현진).
+- `GET /match/ground?keyword=...`, `GET /match/ground/{g_code}` 관리자 서버 구장 조회 연동, DictCursor 적용·상세 `g_time` 누락 수정 (2026-10-26 / 김병재).
+- 숫자 구장 코드 변환 보정 (2026-10-26 / 양태건).
+
+## 6. 품의 · 결재 · 구장 계약 · 휴가 (2026-10-27 / 최현준, 2026-10-30 / 양태건)
+
+- ERD의 기존 테이블(`memorandum`·`approval`·`contract`·`assign`·`shoot`·`h_vacation` 등)만 사용합니다. 컬럼을 추가하지 않습니다 (2026-10-27 / 최현준).
+  - `/approval/templates`·`/approvers`·`/requests`·`/requests/{m_code}`·`/requests/{m_code}/sign` : 양식 조회, 품의 상신, 결재 이력, 승인·반려.
+  - `/approval/contracts` : 계약 관계 조회·최종 계약·연장·해지 기록.
+  - `/approval/vacation`·`/vacation/deputies` : 휴가·대리인, 중복 검사.
+  - `/approval/ground-photos/draft` : 신규 구장 사진 첨부(JPEG·PNG·WebP, 10MB, 최대 20장).
+- 신규 구장 품의의 지도 위치 선택 : 지도 좌표를 `GET /approval/ground-location`으로 도로명·지번 주소로 변환하고 최종 승인 시 `ground.g_address`·`g_lat`·`g_lng`에 저장합니다 (2026-10-30 / 양태건). 네이버 지도 키 설정은 `docs/ground-location-map-2026-10-30.md`를 참고합니다.
+
+## 7. 공지 · 배너 (2026-10-27 / 최현준, 2026-10-28 / 김병재, 양태건)
+
+- `POST /announce/write`(본사·매니저 대상 선택), `GET /announce/admin`, `GET /announce/manager` 공지 작성·조회 (2026-10-27 / 최현준).
+- `/images/banner`(이미지 등록·목록·파일), `/images/banner-select`(노출 기간 선택·현재 배너·취소) 배너 이미지 API (2026-10-28 / 김병재).
+- 공지 작성 창에서 배너 이미지 선택·업로드·노출 기간 적용 화면 (2026-10-28 / 양태건). 배너와 공지 번호는 연결되지 않습니다.
+
+## 8. 문의 답변 (2026-10-23 / 김병재)
+
+- `GET /inquiry/list`, `GET /inquiry/detail/{i_seq}`, `POST /inquiry/answer` 문의 목록·상세·답변.
+
+## 9. 신고 · 제재 · 이의신청 (2026-10-26 ~ 2026-10-27 / 김병재, 2026-10-27 / 양태건)
+
+- 신고 : `GET /report/list`(상태·종목 필터), `/report/detail/{r_seq}`(피신고자 이력), `POST /report/review/{r_seq}`(심의 시작) (2026-10-26 / 김병재).
+- 제재·이의신청 : `GET /appeal/list`, `/appeal/sanction`, `/appeal/detail/{a_seq}`, `POST /appeal/review/{a_seq}`(재심의 시작) (2026-10-27 / 김병재).
+- 본사 신고 관리·제재·이의신청 화면, 필터별 provider 분리와 409 충돌 시 재조회 (2026-10-27 / 양태건). 인용·기각·제재 철회 동작은 없습니다.
+
+## 10. 매니저 교육 (2026-10-27 / 양태건)
+
+- `GET /education/courses`·`/education/managers`, `POST /education/courses`(개설·대상 배정), `POST /education/completion/{training_seq}`(이수 처리).
+- 기존 `training` 테이블을 사용하며 본사 Bearer 토큰과 재직 여부를 검증합니다. 담당 종목·평가 이력 확인 후 재교육을 개설할 수 있습니다.
+
+## 11. 본사 매치 관리 (2026-10-26 ~ 2026-10-28 / 신현진, 양태건)
+
+- 담당자별 예약 : `GET /match/list/{m_id}` (양태건).
+- 취소 경기 : `GET /match/cancel?r_c_category=...`, `/match/cancel/{g_code}` 본사 구장 취소 내역 (2026-10-26 / 신현진). 취소 사유 `r_c_category`의 VARCHAR 형식에 대응하고, 회원 직접 취소는 `회원 개인 사정`으로 표시합니다 (2026-10-28 / 신현진).
+- 팀 대 팀 매칭 : `GET /match/team_match`(상태·검색), `/match/team_match/{team_code}`(홈·원정 팀, 일시·구장·매니저·결과·팀 전적) (2026-10-28 / 신현진). 화면 연결 (2026-10-28 / 양태건).
+
+## 12. 매니저 일정 · 경기 진행 (2026-10-23 ~ 2026-10-30 / 양태건, 신현진)
+
+- 담당 예약 조회 `GET /match/list/{m_id}`, 출석 체크 `POST /match/attendance/{m_id}/{r_seq}`, 회원 점수 기록 `POST /match/score/{m_id}/{r_seq}` (2026-10-23 / 양태건).
+- 경기 진행 `GET·POST /match/operations/{anchor}` : 출석 → A/B 팀 배정 → 골·도움·슈팅·경고·퇴장 기록 → 응급·부상 기록(`c_r_r_injury`) → 경기 종료 → 결과 등록 (2026-10-26 / 양태건). 진행 상태는 서버 메모리에 보관하므로 단일 프로세스로 실행합니다.
+- 매니저 매칭 취소 `PATCH·GET /match/manage/cancel/{m_id}` (사유 1~3) (2026-10-26 / 신현진).
+- 담당 구장 시간대별 일정 `GET /match/schedule/{m_id}?r_date=...` (2026-10-28 / 신현진), 내 매치·지난 매치 화면 연결 (2026-10-29 / 양태건).
+- 경기 진행 4종목(축구·농구·야구·배구) 확장 (2026-10-29 / 신현진).
+- 팀매칭 예약자 출석·경기 운영 `GET·POST /match/team_operations/{code}` (2026-10-30 / 양태건).
+
+## 13. 결과 등록 · 등급 점수 반영 (2026-10-29 / 신현진, 2026-10-29 ~ 2026-10-30 / 양태건)
+
+- 팀 매치 결과 등록·등급 점수 반영 `POST /match/team_result/{m_id}/{team_code}`, 종목별 기록 키 `GET /match/rating/stat_keys` (2026-10-29 / 신현진).
+- 경기별 회원 점수 전·후(`c_result_record.c_r_r_rating_before/after`)와 팀 점수(`t_result_record.t_r_r_rating_after`)를 기록하고, 팀 매칭 상세에 참가 회원 기록을 추가했습니다 (2026-10-29 / 신현진).
+- 결석 회원도 경기 기록의 전·후 점수를 현재 점수(없으면 1500)로 채웁니다 (2026-10-29 / 신현진).
+- 매니저 결과 조회 `GET /match/manager/upcoming`·`/results`·`/results/{code}`·`/teams/{code}/roster` (2026-10-29 / 양태건), 경기별 점수 변동 조회 연동 (2026-10-30 / 양태건).
+- 레이팅 계산식은 별도 자료로 첨부합니다. 회원 앱은 `GET /rating/summary`로 이 점수를 조회합니다.
+
+## 14. 상태관리 · API 문서 (2026-10-30 / 양태건, 2026-11-02 / 김병재)
+
+- 로그인과 서버 조회 24개, 화면 상태(검색어·필터·날짜·화면별 선택값)를 `AsyncNotifierProvider`로 통일했습니다. 경기 운영 조회·명령은 `MatchWorkflowNotifier`·`MatchWorkflowService`로 옮겼습니다 (2026-10-30 / 양태건).
+- 관리자 FastAPI 전체 라우터에 Swagger `summary`·`description`·오류 응답·파라미터 설명을 추가했습니다. API 동작은 바꾸지 않았습니다 (2026-11-02 / 김병재).
+
+## 작업자별 작업 이력
+
+| 작업자 | 작업일 | 작업 내용 |
+| --- | --- | --- |
+| 김병재 | 2026-10-22 | 회원·매니저 관리 조회 API (`/management`) |
+| 김병재 | 2026-10-23 | 문의 목록·상세·답변 API (`/inquiry`) |
+| 김병재 | 2026-10-26 | 관리자 서버 구장 조회 API 연동·DictCursor 수정, 신고 목록·상세·심의 API (`/report`) |
+| 김병재 | 2026-10-27 | 제재·이의신청 조회·재심의 API (`/appeal`) |
+| 김병재 | 2026-10-28 | 배너 이미지 등록·선택 API (`/images`) |
+| 김병재 | 2026-11-02 | 관리자 FastAPI 전체 Swagger 문서화 |
+| 신현진 | 2026-10-22 | 모델 파일 생성 |
+| 신현진 | 2026-10-23 | 본사 구장 조회 vm, flutter_riverpod 설정 |
+| 신현진 | 2026-10-26 | 매니저 매칭 취소, 본사 구장 취소 내역 조회 API |
+| 신현진 | 2026-10-27 | 본사 팀 관리 조회 API |
+| 신현진 | 2026-10-28 | 팀 대 팀 매칭 조회 API, 취소 사유 VARCHAR 대응·`회원 개인 사정` 표기, 매니저 구장 시간대별 일정 API |
+| 신현진 | 2026-10-29 | 팀 매치 결과 등록·등급 점수 반영, 경기 진행 4종목 확장, 경기별 회원·팀 점수 기록, 결석 회원 전·후 점수 저장 |
+| 양태건 | 2026-10-22 | Flutter 관리자 앱 생성·의존성·폴더 구성 |
+| 양태건 | 2026-10-23 | 매니저 예약 조회, 출석 체크, 회원 점수 기록 API |
+| 양태건 | 2026-10-26 | 부서 기반 통합 로그인, 매니저 경기 진행, 구장 코드 변환 수정 |
+| 양태건 | 2026-10-27 | 본사 프론트 연결(대시보드·공지·제재·팀·품의), 신고 관리 화면, 매니저 교육 |
+| 양태건 | 2026-10-28 | 관리자 목업 반영, 팀 매칭·취소 조회 연결, 배너 설정 화면 |
+| 양태건 | 2026-10-29 | 담당 구장 일정·내 매치·지난 매치, 매니저 결과 조회 API |
+| 양태건 | 2026-10-30 | AsyncNotifier 상태관리 통일, 구장 품의 지도 위치 선택, 팀매칭 출석·운영, 점수 변동 조회 연동 |
+| 최현준 | 2026-10-22 | 본사·매니저 로그인 API |
+| 최현준 | 2026-10-24 | 본사·매니저 운영 Front v1 |
+| 최현준 | 2026-10-27 | 본사·매니저 대상 공지 작성·조회 API, ERD 기반 구장 계약·휴가 품의 및 결재 이력 |
+
+## 실행
+
+```sh
+# FastAPI 서버 (관리자 프로젝트 루트에서, 단일 프로세스)
+python python/main.py
+
+# Flutter 앱
+flutter run --dart-define=API_BASE_URL=http://<서버 주소>:8000
+```
+
+- 서버 접속 정보는 `.env.example`을 참고해 로컬 `.env`에 작성합니다. `.env`, 서비스 계정 JSON, 지도 Client Secret은 커밋하지 않습니다.
+- `API_BASE_URL`을 생략하면 `http://localhost:8000`을 사용합니다. Android 에뮬레이터는 `http://10.0.2.2:8000`을 사용합니다.
+- 구장 품의 지도는 `--dart-define=NAVER_MAP_CLIENT_ID=...`가 필요합니다.
+
+## 참고 · 제한
+
+- 매출 현황, 본사 전체 경기 집계, 미이수자 알림 발송, 평가 작성 API는 없어 화면에 표시하지 않습니다.
+- 결제 기록은 PG 승인·실제 환불 완료를 의미하지 않습니다.
+- 경기 진행 상태는 서버 메모리에 보관하므로 서버를 재시작하면 등록 전 진행 상태가 사라집니다.
+- 기능별 상세 계약·검증 범위는 `docs/` 문서를 확인합니다.
