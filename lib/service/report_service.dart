@@ -25,5 +25,22 @@ class ReportService {
       throw Exception('심의를 시작하지 못했습니다. 다시 시도해 주세요.');
     }
   }
+
+  // 수정 일 : 2026-11-03 / 작업자 : 김병재
+  // 제재 등록: POST /report/sanction/{r_seq} (JSON h_id, sanction_type, content)
+  Future<void> createSanction(
+    int id,
+    String staffId,
+    String type,
+    String content,
+  ) async {
+    final result = await api.request(
+      '/report/sanction/$id',
+      json: {'h_id': staffId, 'sanction_type': type, 'content': content},
+    );
+    if (result['result'] != 'OK') {
+      throw Exception('제재를 등록하지 못했습니다. 다시 시도해 주세요.');
+    }
+  }
 }
-// 최종 수정 일 : 2026-10-27 / 작업자 : 양태건
+// 최종 수정 일 : 2026-11-03 / 작업자 : 김병재
