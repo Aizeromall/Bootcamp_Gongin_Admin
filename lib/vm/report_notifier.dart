@@ -78,6 +78,44 @@ class ReportReview extends AsyncNotifier<void> {
 
 final reportReviewProvider = AsyncNotifierProvider.autoDispose
     .family<ReportReview, void, ReportDetailKey>(ReportReview.new);
+
+// 수정 일 : 2026-11-03 / 작업자 : 김병재
+// 제재 등록 후 목록·상세·집계를 갱신합니다. 쓰기 요청은 자동 재전송하지 않습니다.
+class ReportSanction extends AsyncNotifier<void> {
+  ReportSanction(this.key);
+  final ReportDetailKey key;
+  @override
+  void build() {
+    ref.watch(loginProvider);
+  }
+
+  Future<bool> create(String type, String content) async {
+    if (state.isLoading) return false;
+    state = const AsyncLoading();
+    try {
+      await ref
+          .read(reportServiceProvider)
+          .createSanction(key.id, key.staffId, type, content);
+      if (!ref.mounted) return false;
+      ref.invalidate(reportListProvider);
+      ref.invalidate(operationsDataProvider);
+      ref.invalidate(reportDetailProvider(key));
+      state = const AsyncData(null);
+      return true;
+    } catch (error, stack) {
+      if (!ref.mounted) return false;
+      if (error is OperationsApiException && error.statusCode == 409) {
+        ref.invalidate(reportListProvider);
+        ref.invalidate(reportDetailProvider(key));
+      }
+      state = AsyncError(error, stack);
+      return false;
+    }
+  }
+}
+
+final reportSanctionProvider = AsyncNotifierProvider.autoDispose
+    .family<ReportSanction, void, ReportDetailKey>(ReportSanction.new);
 String reportErrorText(Object error) => error is OperationsApiException
     ? error.message
     : '신고 정보를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';

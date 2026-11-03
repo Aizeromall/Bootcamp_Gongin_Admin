@@ -27,6 +27,22 @@ class DeferredReportApi extends OperationsApi {
   }
 }
 
+class RecordingReportApi extends OperationsApi {
+  final paths = <String>[];
+  final bodies = <Map<String, dynamic>?>[];
+  Map<String, dynamic> reply = {'result': 'OK'};
+  @override
+  Future<Map<String, dynamic>> request(
+    String path, {
+    Map<String, dynamic>? json,
+    Map<String, String>? form,
+  }) async {
+    paths.add(path);
+    bodies.add(json);
+    return reply;
+  }
+}
+
 Map<String, dynamic> collection(int id) => {
   'results': [
     {'r_seq': id, 'state_text': '접수'},
@@ -44,6 +60,51 @@ void main() {
   });
   test('누락된 신고 식별자를 가짜 ID로 변환하지 않는다', () {
     expect(() => ReportRecord.fromJson({}), throwsFormatException);
+  });
+  // 수정 일 : 2026-11-03 / 작업자 : 김병재
+  // 제재 등록 버튼은 심의를 시작한 본인의 심의중 신고에만 노출합니다.
+  test('제재 등록은 심의를 시작한 본인의 심의중 신고에서만 가능하다', () {
+    final mine = ReportRecord.fromJson({
+      'r_seq': 1,
+      'state_text': '심의중',
+      'h_id': 'hq01',
+    });
+    expect(mine.canSanction('hq01'), isTrue);
+    expect(mine.canSanction('hq02'), isFalse);
+    final received = ReportRecord.fromJson({'r_seq': 2, 'state_text': '접수'});
+    expect(received.canSanction('hq01'), isFalse);
+    final done = ReportRecord.fromJson({
+      'r_seq': 3,
+      'state_text': '처리완료',
+      'h_id': 'hq01',
+    });
+    expect(done.canSanction('hq01'), isFalse);
+  });
+  test('제재 등록은 JSON 본문으로 전송하고 OK일 때만 성공으로 처리한다', () async {
+    final api = RecordingReportApi();
+    final container = ProviderContainer(
+      overrides: [operationsApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    const key = (staffId: 'hq01', id: 7);
+    final sub = container.listen(reportSanctionProvider(key), (_, _) {});
+    addTearDown(sub.close);
+    final ok = await container
+        .read(reportSanctionProvider(key).notifier)
+        .create('경고', '폭언');
+    expect(ok, isTrue);
+    expect(api.paths.single, '/report/sanction/7');
+    expect(api.bodies.single, {
+      'h_id': 'hq01',
+      'sanction_type': '경고',
+      'content': '폭언',
+    });
+    api.reply = {'result': 'Error'};
+    final failed = await container
+        .read(reportSanctionProvider(key).notifier)
+        .create('경고', '폭언');
+    expect(failed, isFalse);
+    expect(container.read(reportSanctionProvider(key)).hasError, isTrue);
   });
   test('늦은 이전 필터 응답이 현재 결과를 덮어쓰지 않는다', () async {
     final api = DeferredReportApi();

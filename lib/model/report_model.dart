@@ -30,6 +30,7 @@ class ReportRecord {
       matchCode = reportText(json['c_r_r_code']),
       manager = reportText(json['m_name']),
       reviewer = reportText(json['h_name']),
+      reviewerId = reportText(json['h_id']),
       canStartReview = json['can_start_review'] == true,
       evidence = (json['r_evidence'] as List? ?? [])
           .map((v) => '$v')
@@ -48,8 +49,12 @@ class ReportRecord {
       matchTime,
       matchCode,
       manager,
-      reviewer;
+      reviewer,
+      reviewerId;
   final bool canStartReview;
+  // 수정 일 : 2026-11-03 / 작업자 : 김병재
+  // 제재 등록은 심의중이고 로그인한 직원이 심의를 시작한 신고에서만 가능합니다(서버도 같은 조건으로 검증).
+  bool canSanction(String staffId) => status == '심의중' && reviewerId == staffId;
   final List<String> evidence;
   final Map<String, dynamic>? history;
   int? get warnings => reportInt(history?['warning_count']);

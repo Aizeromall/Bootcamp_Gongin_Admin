@@ -369,6 +369,7 @@ class _ReportDetail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final result = ref.watch(reportDetailProvider(detailKey));
     final review = ref.watch(reportReviewProvider(detailKey));
+    final sanction = ref.watch(reportSanctionProvider(detailKey));
     return result.when(
       loading: () =>
           const Center(child: CircularProgressIndicator(color: _blue)),
@@ -615,6 +616,60 @@ class _ReportDetail extends ConsumerWidget {
                         : const Icon(Icons.fact_check_outlined),
                     label: Text(review.isLoading ? '처리 중…' : '심의 시작'),
                   ),
+                ] else if (report.canSanction(detailKey.staffId)) ...[
+                  // 수정 일 : 2026-11-03 / 작업자 : 김병재
+                  // 심의를 시작한 본인에게만 제재 등록 버튼을 보여 줍니다.
+                  if (sanction.hasError)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        reportErrorText(sanction.error!),
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  const Text(
+                    '심의 결과 제재가 필요하면 피신고자에게 제재를 등록하세요. 등록하면 처리완료로 바뀝니다.',
+                    style: TextStyle(color: _muted, height: 1.6),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFD04C3F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.all(18),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: sanction.isLoading
+                        ? null
+                        : () async {
+                            final input = await showDialog<(String, String)>(
+                              context: context,
+                              builder: (context) =>
+                                  _SanctionDialog(target: report.target),
+                            );
+                            if (input == null || !context.mounted) return;
+                            final success = await ref
+                                .read(
+                                  reportSanctionProvider(detailKey).notifier,
+                                )
+                                .create(input.$1, input.$2);
+                            if (success && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('제재를 등록했습니다.')),
+                              );
+                            }
+                          },
+                    icon: sanction.isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.gavel_outlined),
+                    label: Text(sanction.isLoading ? '처리 중…' : '제재 등록'),
+                  ),
                 ] else
                   Text(
                     report.status == '심의중'
@@ -629,6 +684,78 @@ class _ReportDetail extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// 수정 일 : 2026-11-03 / 작업자 : 김병재
+// 제재 종류와 내용을 입력받습니다. 입력 컨트롤러는 다이얼로그가 소유하고 닫을 때 정리합니다.
+class _SanctionDialog extends StatefulWidget {
+  const _SanctionDialog({required this.target});
+  final String target;
+  @override
+  State<_SanctionDialog> createState() => _SanctionDialogState();
+}
+
+class _SanctionDialogState extends State<_SanctionDialog> {
+  final _content = TextEditingController();
+  String _type = '경고';
+
+  @override
+  void dispose() {
+    _content.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _content.text.trim();
+    // 서버 검증과 같은 조건: 내용 필수, 200자 이하, '['로 시작 불가
+    final valid =
+        text.isNotEmpty && text.length <= 200 && !text.startsWith('[');
+    return AlertDialog(
+      title: const Text('제재 등록'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('피신고자 ${widget.target}에게 제재를 등록합니다.'),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _type,
+              decoration: const InputDecoration(labelText: '제재 종류'),
+              items: [
+                for (final type in ['경고', '이용정지', '기타'])
+                  DropdownMenuItem(value: type, child: Text(type)),
+              ],
+              onChanged: (value) => setState(() => _type = value ?? _type),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _content,
+              maxLength: 200,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: '제재 내용',
+                hintText: '예: 폭언·욕설 (10/26 고척)',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: valid ? () => Navigator.pop(context, (_type, text)) : null,
+          child: const Text('제재 등록'),
+        ),
+      ],
     );
   }
 }
